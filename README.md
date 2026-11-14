@@ -48,6 +48,21 @@ $lnk.Save()
 
 Danach startet ein Doppelklick auf "Humanizer" am Desktop die App ohne Terminal-Fenster.
 
+## Modelle in der App herunterladen
+
+Der Knopf **Modelle …** neben der Modell-Auswahl öffnet eine Liste empfohlener Modelle. Zu jedem steht die Download-Größe, was es an Grafikspeicher oder RAM braucht, und wie es auf deinem Rechner voraussichtlich läuft. Ein Klick auf **Herunterladen** holt das Modell über Ollama, der Fortschritt steht unten im Fenster. Über "Anderes Modell" lässt sich jedes Modell aus der [Ollama-Bibliothek](https://ollama.com/library) per Name laden.
+
+| Modell | Download | Braucht |
+| --- | --- | --- |
+| gemma3:1b | 0,8 GB | 2 GB Grafikspeicher oder 4 GB RAM |
+| gemma3:4b | 3,3 GB | 4 GB Grafikspeicher oder 8 GB RAM |
+| gemma3:12b | 8,1 GB | 10 GB Grafikspeicher oder 16 GB RAM |
+| mistral-nemo:12b | 7,1 GB | 10 GB Grafikspeicher oder 16 GB RAM |
+| mistral-small3.2:24b | 15 GB | 18 GB Grafikspeicher oder 32 GB RAM |
+| gemma3:27b | 17 GB | 20 GB Grafikspeicher oder 32 GB RAM |
+
+Die Werte sind Richtwerte. Reicht der Grafikspeicher nicht, läuft ein Modell über den RAM, nur deutlich langsamer. Die App erkennt den Grafikspeicher nur bei NVIDIA-Karten.
+
 ## Bedienung
 
 1. Modell und Stil oben auswählen. Die Liste zeigt alle in Ollama installierten Modelle.

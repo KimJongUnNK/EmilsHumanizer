@@ -29,6 +29,20 @@ def fake_ollama():
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             seen.append((self.path, body))
+            if self.path == "/api/pull":
+                self.send_response(200)
+                self.end_headers()
+                if body["model"] == "gibtsnicht":
+                    self.wfile.write(b'{"error":"pull model manifest: file does not exist"}\n')
+                    return
+                for line in [{"status": "pulling manifest"},
+                             {"status": "pulling a", "digest": "a", "total": 300, "completed": 150},
+                             {"status": "pulling b", "digest": "b", "total": 100, "completed": 100},
+                             {"status": "pulling a", "digest": "a", "total": 300, "completed": 300},
+                             {"status": "success"}]:
+                    self.wfile.write(json.dumps(line).encode() + b"\n")
+                state["models"].append(body["model"])
+                return
             if self.path == "/api/generate":
                 state["loaded"].remove(body["model"])
                 return self._send(200, {"done": True})
@@ -81,6 +95,36 @@ def test_unload_models(fake_ollama):
     assert seen[-1] == ("/api/generate", {"model": "gemma3:12b", "keep_alive": 0})
     assert state["loaded"] == []
     assert h.unload_models(url) == 0
+
+
+def test_pull_model_meldet_fortschritt(fake_ollama):
+    url, seen, state = fake_ollama
+    progress = []
+    h.pull_model("gemma3:4b", url, lambda percent, status: progress.append(percent))
+    assert progress == [0, 50, 62, 100, 100]
+    assert seen[-1] == ("/api/pull", {"model": "gemma3:4b", "stream": True})
+    assert "gemma3:4b" in state["models"]
+
+
+def test_pull_model_unbekanntes_modell(fake_ollama):
+    url, _, _ = fake_ollama
+    with pytest.raises(h.OllamaError, match="gibtsnicht"):
+        h.pull_model("gibtsnicht", url)
+
+
+def test_verdict():
+    assert h.verdict(10, 16, 32, 8) == "läuft, aber langsamer"
+    assert h.verdict(4, 8, 31.7, 7.996) == "läuft flüssig"
+    assert h.verdict(20, 32, 16, 8) == "zu groß für diesen Rechner"
+    assert h.verdict(4, 8, 16, None) == "läuft, aber langsamer"
+    assert h.verdict(4, 8, None, None) == ""
+
+
+def test_katalog_und_speicher():
+    assert h.PREFERRED_MODEL in [row[0] for row in h.CATALOG]
+    assert all(len(row) == 5 and row[1] > 0 and row[2] <= row[3] for row in h.CATALOG)
+    ram, vram = h.system_memory()
+    assert ram is None or ram > 0
 
 
 def test_fehler_von_ollama(fake_ollama):
@@ -140,7 +184,7 @@ def test_app_ohne_modelle(root, fake_ollama):
     url, _, state = fake_ollama
     state["models"] = []
     app = h.App(root, url)
-    pump(root, lambda: "ollama pull" in app.status["text"])
+    pump(root, lambda: "Kein Modell installiert" in app.status["text"])
     assert str(app.go["state"]) == "disabled"
 
 
@@ -165,3 +209,40 @@ def test_app_cache_leeren(root, fake_ollama):
     assert str(app.clear["state"]) == "normal"
     app.clear_cache()
     pump(root, lambda: "kein Modell geladen" in app.status["text"])
+
+
+def test_app_modell_herunterladen(root, fake_ollama, monkeypatch):
+    url, _, state = fake_ollama
+    monkeypatch.setattr(h, "system_memory", lambda: (32.0, 8.0))
+    app = h.App(root, url)
+    pump(root, lambda: str(app.go["state"]) == "normal")
+    app.open_models()
+    assert "32 GB RAM, 8 GB Grafikspeicher" in app.machine["text"]
+    installed_button, _ = app.rows["gemma3:12b"]
+    assert "Installiert" in installed_button["text"] and str(installed_button["state"]) == "disabled"
+    button, fit = app.rows["gemma3:4b"]
+    assert button["text"] == "Herunterladen" and "läuft flüssig" in fit["text"]
+    assert "zu groß" not in app.rows["gemma3:27b"][1]["text"] and "langsamer" in app.rows["gemma3:27b"][1]["text"]
+
+    button.invoke()
+    pump(root, lambda: "ist installiert" in app.pull_status["text"])
+    assert "gemma3:4b" in app.model["values"]
+    assert "Installiert" in button["text"]
+    assert app.model.get() == "gemma3:12b"
+    assert str(app.rows["gemma3:1b"][0]["state"]) == "normal"
+
+    app.custom.insert(0, "gibtsnicht")
+    app.custom_button.invoke()
+    pump(root, lambda: "fehlgeschlagen" in app.pull_status["text"])
+    assert app.pulling is None and str(app.custom_button["state"]) == "normal"
+
+
+def test_app_ohne_modelle_dann_download(root, fake_ollama):
+    url, _, state = fake_ollama
+    state["models"] = []
+    app = h.App(root, url)
+    pump(root, lambda: "Modelle" in app.status["text"])
+    app.open_models()
+    app.rows["gemma3:12b"][0].invoke()
+    pump(root, lambda: str(app.go["state"]) == "normal")
+    assert app.model.get() == "gemma3:12b"

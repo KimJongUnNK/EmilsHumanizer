@@ -1,5 +1,5 @@
 """Humanizer als Desktop-App: schreibt KI-Texte lokal über Ollama so um, dass sie menschlich klingen.
-Braucht nur Python und Ollama, keine weiteren Pakete. Start: pythonw humanizer.py
+Braucht nur Ollama. Als fertige Humanizer.exe oder mit Python: pythonw humanizer.py
 """
 import difflib
 import json
@@ -150,7 +150,8 @@ def ensure_ollama(url: str = OLLAMA_URL, wait: int = 15) -> list[str]:
         subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except OSError as e:
-        raise OllamaUnreachable("Ollama ist nicht installiert. Im Terminal: winget install Ollama.Ollama") from e
+        raise OllamaUnreachable("Ollama ist nicht installiert. Lade es von ollama.com/download, installiere es "
+                                "und starte den Humanizer neu.") from e
     for _ in range(wait):
         time.sleep(1)
         try:

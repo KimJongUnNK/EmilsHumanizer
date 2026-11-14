@@ -33,6 +33,10 @@ Die App garantiert nicht, dass ein Text an KI-Detektoren vorbeikommt. Lokale Mod
 
 Sehr lange Texte (grob über 2.000 Wörter) in Teilen umschreiben, sonst schneidet Ollama den Anfang stillschweigend ab.
 
+## Update
+
+Der Knopf **Update** oben rechts prüft, ob es eine neuere Version gibt. Wenn ja, lädt die App sie nach einer Rückfrage herunter, ersetzt sich selbst und startet neu. Die App prüft nur auf Klick, nie von allein. Wer aus dem Quelltext startet, lädt die neue Version selbst von dieser Seite.
+
 ## Modelle
 
 Der Knopf **Modelle …** öffnet eine Liste empfohlener Modelle. Zu jedem steht die Download-Größe, was es an Grafikspeicher oder RAM braucht, und wie es auf deinem Rechner voraussichtlich läuft. **Herunterladen** holt das Modell über Ollama, der Fortschritt steht unten im Fenster. Über "Anderes Modell" lässt sich jedes Modell aus der [Ollama-Bibliothek](https://ollama.com/library) per Name laden.
@@ -45,6 +49,8 @@ Der Knopf **Modelle …** öffnet eine Liste empfohlener Modelle. Zu jedem steht
 | mistral-nemo:12b | 7,1 GB | 10 GB Grafikspeicher oder 16 GB RAM |
 | mistral-small3.2:24b | 15 GB | 18 GB Grafikspeicher oder 32 GB RAM |
 | gemma3:27b | 17 GB | 20 GB Grafikspeicher oder 32 GB RAM |
+
+Ein laufender Download lässt sich mit **Abbrechen** stoppen. Was schon geladen ist, bleibt liegen, beim nächsten Versuch geht es dort weiter. Installierte Modelle haben einen **Löschen**-Knopf, das gibt den Speicherplatz wieder frei.
 
 Die Werte sind Richtwerte. Reicht der Grafikspeicher nicht, läuft ein Modell über den RAM, nur deutlich langsamer. Die App erkennt den Grafikspeicher nur bei NVIDIA-Karten.
 

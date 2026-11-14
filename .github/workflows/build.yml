@@ -18,6 +18,14 @@ jobs:
           python-version: "3.13"
       - run: pip install pytest pyinstaller
       - run: pytest -q test_humanizer.py
+      - name: Version in die App schreiben
+        shell: python
+        run: |
+          import os, pathlib
+          path = pathlib.Path("humanizer.py")
+          source = path.read_text(encoding="utf-8")
+          assert 'BUILD = "dev"' in source
+          path.write_text(source.replace('BUILD = "dev"', f'BUILD = "{os.environ["GITHUB_SHA"]}"'), encoding="utf-8")
       - run: pyinstaller --onefile --windowed --name Humanizer humanizer.py
       - uses: actions/upload-artifact@v4
         with:

@@ -149,6 +149,14 @@ def ensure_ollama(url: str = OLLAMA_URL, wait: int = 15) -> list[str]:
     return list_models(url)
 
 
+def unload_models(url: str = OLLAMA_URL) -> int:
+    """Wirft alle geladenen Modelle aus dem Arbeits- und Grafikspeicher. Liefert, wie viele es waren."""
+    loaded = [m["name"] for m in _request(url + "/api/ps", timeout=5).get("models", [])]
+    for name in loaded:
+        _request(url + "/api/generate", {"model": name, "keep_alive": 0}, timeout=30)
+    return len(loaded)
+
+
 def humanize(text: str, style: str, model: str, url: str = OLLAMA_URL) -> str:
     reply = _request(url + "/api/chat", {
         "model": model,
@@ -201,6 +209,10 @@ class App:
                               activebackground="#333333", activeforeground=FG, relief="flat", bd=0, highlightthickness=0,
                               font=("Segoe UI", 11), padx=18, pady=8, cursor="hand2")
         self.copy.pack(side="left", padx=10)
+        self.clear = tk.Button(bottom, text="Cache leeren", command=self.clear_cache, bg=PANEL, fg=FG,
+                               activebackground="#333333", activeforeground=FG, relief="flat", bd=0, highlightthickness=0,
+                               font=("Segoe UI", 11), padx=18, pady=8, cursor="hand2")
+        self.clear.pack(side="left")
         self.status = tk.Label(bottom, text="Suche Ollama …", bg=BG, fg=MUTED, font=("Segoe UI", 10), anchor="w")
         self.status.pack(side="left", fill="x", expand=True, padx=8)
 
@@ -252,6 +264,7 @@ class App:
 
     def _on_error(self, message: str) -> None:
         self.status.config(text=message, fg=ACCENT)
+        self.clear.config(state="normal")
         if self.model.get():
             self.go.config(state="normal")
 
@@ -272,6 +285,28 @@ class App:
             f"Fertig in {seconds:.0f} s  ·  {changed_share(result, added)} % neu formuliert  ·  "
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
             f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))
+
+    def _on_cleared(self, count: int) -> None:
+        self.clear.config(state="normal")
+        self.status.config(fg=MUTED, text=(
+            "Es war kein Modell geladen, der Speicher ist schon frei." if count == 0 else
+            f"Speicher freigegeben: {count} Modell{'e' if count > 1 else ''} entladen. "
+            "Das nächste Umschreiben dauert dadurch etwas länger."))
+
+    def clear_cache(self) -> None:
+        """Entlädt die Modelle aus dem Speicher. Ollama hält sie sonst noch Minuten nach dem letzten Text."""
+        if str(self.go["state"]) == "disabled" and self.model.get():
+            self.status.config(text="Gerade läuft ein Umschreiben. Danach noch einmal klicken.", fg=MUTED)
+            return
+        self.clear.config(state="disabled")
+
+        def work() -> None:
+            try:
+                self.events.put(("cleared", unload_models(self.url)))
+            except OllamaError as e:
+                self.events.put(("error", str(e)))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def run(self) -> None:
         text = self.input.get("1.0", "end").strip()

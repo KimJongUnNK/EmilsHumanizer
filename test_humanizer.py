@@ -13,7 +13,7 @@ import humanizer as h
 @pytest.fixture
 def fake_ollama():
     seen = []
-    state = {"models": ["llama3.2:3b", "gemma3:12b"]}
+    state = {"models": ["llama3.2:3b", "gemma3:12b"], "loaded": ["gemma3:12b"]}
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, payload):
@@ -23,11 +23,15 @@ def fake_ollama():
 
         def do_GET(self):
             seen.append((self.path, None))
-            self._send(200, {"models": [{"name": n} for n in state["models"]]})
+            names = state["loaded"] if self.path == "/api/ps" else state["models"]
+            self._send(200, {"models": [{"name": n} for n in names]})
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             seen.append((self.path, body))
+            if self.path == "/api/generate":
+                state["loaded"].remove(body["model"])
+                return self._send(200, {"done": True})
             if body["model"] == "kaputt":
                 return self._send(500, {"error": "boom"})
             self._send(200, {"message": {"role": "assistant", "content": " Kurz. Und dann ein deutlich längerer Satz hinterher. \n"}})
@@ -69,6 +73,14 @@ def test_humanize_anfrage(fake_ollama):
     assert path == "/api/chat" and body["stream"] is False
     assert body["options"]["num_ctx"] == h.OLLAMA_CONTEXT
     assert h.STYLES["Locker"] in body["messages"][0]["content"]
+
+
+def test_unload_models(fake_ollama):
+    url, seen, state = fake_ollama
+    assert h.unload_models(url) == 1
+    assert seen[-1] == ("/api/generate", {"model": "gemma3:12b", "keep_alive": 0})
+    assert state["loaded"] == []
+    assert h.unload_models(url) == 0
 
 
 def test_fehler_von_ollama(fake_ollama):
@@ -141,3 +153,15 @@ def test_app_zeigt_fehler_und_bleibt_bedienbar(root, fake_ollama):
     app.run()
     pump(root, lambda: "500" in app.status["text"])
     assert str(app.go["state"]) == "normal"
+
+
+def test_app_cache_leeren(root, fake_ollama):
+    url, _, state = fake_ollama
+    app = h.App(root, url)
+    pump(root, lambda: str(app.go["state"]) == "normal")
+    app.clear_cache()
+    pump(root, lambda: "1 Modell entladen" in app.status["text"])
+    assert state["loaded"] == []
+    assert str(app.clear["state"]) == "normal"
+    app.clear_cache()
+    pump(root, lambda: "kein Modell geladen" in app.status["text"])

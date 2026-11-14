@@ -55,6 +55,8 @@ Danach startet ein Doppelklick auf "Humanizer" am Desktop die App ohne Terminal-
 3. **Umschreiben** klicken oder Strg+Enter drücken.
 4. Ergebnis rechts prüfen und mit **Kopieren** übernehmen.
 
+**Cache leeren** wirft das Modell aus dem Arbeits- und Grafikspeicher. Ollama hält es sonst noch einige Minuten nach dem letzten Text geladen. Sinnvoll, wenn du den Speicher gleich für etwas anderes brauchst, etwa ein Spiel oder einen Videoschnitt. Das nächste Umschreiben dauert danach etwas länger, weil das Modell neu geladen wird.
+
 Sehr lange Texte (grob über 2.000 Wörter) in Teilen umschreiben, sonst schneidet Ollama den Anfang stillschweigend ab.
 
 Läuft Ollama auf einem anderen Rechner oder Port, die Adresse über die Umgebungsvariable `OLLAMA_URL` setzen (Standard: `http://localhost:11434`).

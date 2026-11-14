@@ -7,12 +7,19 @@ import os
 import queue
 import re
 import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
 import urllib.error
 import urllib.request
-from tkinter import scrolledtext, ttk
+from tkinter import messagebox, scrolledtext, ttk
+
+REPO = "KimJongUnNK/EmilsHumanizer"
+RELEASE_API = f"https://api.github.com/repos/{REPO}/releases/latest"
+EXE_URL = f"https://github.com/{REPO}/releases/latest/download/Humanizer.exe"
+# Beim Bauen der .exe ersetzt GitHub "dev" durch den Commit, aus dem sie gebaut wurde.
+BUILD = "dev"
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 PREFERRED_MODEL = "gemma3:12b"
@@ -124,12 +131,21 @@ class OllamaUnreachable(OllamaError):
     pass
 
 
-def _request(url: str, payload: dict | None = None, timeout: int = 600) -> dict:
+class PullCancelled(OllamaError):
+    pass
+
+
+class UpdateError(RuntimeError):
+    pass
+
+
+def _request(url: str, payload: dict | None = None, timeout: int = 600, method: str | None = None) -> dict:
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.load(resp)
+            body = resp.read()
+            return json.loads(body) if body.strip() else {}
     except urllib.error.HTTPError as e:
         raise OllamaError(f"Ollama meldet Fehler {e.code}: {e.read().decode(errors='replace')}") from e
     except (urllib.error.URLError, OSError) as e:
@@ -169,14 +185,25 @@ def unload_models(url: str = OLLAMA_URL) -> int:
     return len(loaded)
 
 
-def pull_model(name: str, url: str = OLLAMA_URL, on_progress=lambda percent, status: None) -> None:
-    """Lädt ein Modell über Ollama herunter und meldet den Fortschritt in Prozent."""
+def delete_model(name: str, url: str = OLLAMA_URL) -> None:
+    _request(url + "/api/delete", {"model": name}, timeout=60, method="DELETE")
+
+
+def pull_model(name: str, url: str = OLLAMA_URL, on_progress=lambda percent, status: None,
+               cancel: threading.Event | None = None) -> None:
+    """Lädt ein Modell über Ollama herunter und meldet den Fortschritt in Prozent.
+
+    Ist cancel gesetzt, wird die Verbindung geschlossen; Ollama bricht den Download dann ab.
+    """
     body = json.dumps({"model": name, "stream": True}).encode()
     req = urllib.request.Request(url + "/api/pull", data=body, headers={"Content-Type": "application/json"})
     layers: dict[str, tuple[int, int]] = {}
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             for line in resp:
+                if cancel is not None and cancel.is_set():
+                    raise PullCancelled(f"Download von {name} abgebrochen. Was schon geladen ist, bleibt liegen: "
+                                        "Beim nächsten Versuch geht es dort weiter.")
                 if not line.strip():
                     continue
                 msg = json.loads(line)
@@ -191,6 +218,58 @@ def pull_model(name: str, url: str = OLLAMA_URL, on_progress=lambda percent, sta
         raise OllamaError(f"Ollama meldet Fehler {e.code}: {e.read().decode(errors='replace')}") from e
     except (urllib.error.URLError, OSError) as e:
         raise OllamaUnreachable("Die Verbindung zu Ollama ist abgebrochen. Download noch einmal starten.") from e
+
+
+def latest_build(api: str = RELEASE_API) -> str:
+    """Commit, aus dem die neueste veröffentlichte .exe gebaut wurde."""
+    req = urllib.request.Request(api, headers={"Accept": "application/vnd.github+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.load(resp)["target_commitish"]
+    except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+        raise UpdateError("GitHub ist gerade nicht erreichbar. Versuch es später noch einmal.") from e
+
+
+def download_file(url: str, target: str, on_progress=lambda percent: None) -> None:
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp, open(target, "wb") as out:
+            total, done = int(resp.headers.get("Content-Length") or 0), 0
+            while chunk := resp.read(65536):
+                out.write(chunk)
+                done += len(chunk)
+                on_progress(round(100 * done / total) if total else 0)
+    except (urllib.error.URLError, OSError) as e:
+        raise UpdateError("Der Download des Updates ist fehlgeschlagen. Die App bleibt, wie sie ist.") from e
+
+
+def backup_path(executable: str) -> str:
+    root, ext = os.path.splitext(executable)
+    return root + ".old" + ext
+
+
+def swap_executable(current: str, new: str) -> None:
+    """Setzt new an die Stelle von current. Die bisherige Datei bleibt als .old daneben liegen.
+
+    Windows lässt eine laufende .exe nicht überschreiben, aber umbenennen. Geht der zweite Schritt
+    schief, wird zurückbenannt, damit die alte Version startbar bleibt.
+    """
+    old = backup_path(current)
+    if os.path.exists(old):
+        os.remove(old)
+    os.rename(current, old)
+    try:
+        os.rename(new, current)
+    except OSError:
+        os.rename(old, current)
+        raise
+
+
+def cleanup_old(executable: str) -> None:
+    """Räumt die Vorgängerversion weg, die ein Update liegen gelassen hat."""
+    try:
+        os.remove(backup_path(executable))
+    except OSError:
+        pass
 
 
 def system_memory() -> tuple[float | None, float | None]:
@@ -251,6 +330,8 @@ class App:
         self.memory: tuple[float | None, float | None] = (None, None)
         self.busy = False
         self.pulling: str | None = None
+        self.cancel_pull = threading.Event()
+        self.updating = False
         self.dialog: tk.Toplevel | None = None
         root.title("Humanizer")
         root.geometry("1200x760")
@@ -281,6 +362,11 @@ class App:
         self.style = ttk.Combobox(bar, state="readonly", width=14, values=list(STYLES), font=("Segoe UI", 10))
         self.style.current(0)
         self.style.pack(side="left", padx=8)
+        self.update_button = tk.Button(bar, text="Update", command=self.check_update, bg=PANEL, fg=FG,
+                                       activebackground="#333333", activeforeground=FG, disabledforeground=MUTED,
+                                       relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
+                                       padx=12, pady=4, cursor="hand2")
+        self.update_button.pack(side="right")
 
         bottom = tk.Frame(root, bg=BG)
         bottom.pack(side="bottom", fill="x", padx=24, pady=16)
@@ -398,7 +484,7 @@ class App:
             tk.Label(d, text=note, bg=BG, fg=FG, font=small).grid(row=row, column=3, sticky="w", padx=10, pady=(10, 0))
             fit = tk.Label(d, bg=BG, font=small)
             fit.grid(row=row + 1, column=3, sticky="w", padx=10)
-            button = tk.Button(d, command=lambda n=name: self.start_pull(n), bg=PANEL, fg=FG, width=14,
+            button = tk.Button(d, command=lambda n=name: self.row_action(n), bg=PANEL, fg=FG, width=14,
                                activebackground="#333333", activeforeground=FG, disabledforeground=MUTED,
                                relief="flat", bd=0, highlightthickness=0, font=small, pady=5, cursor="hand2")
             button.grid(row=row, column=4, rowspan=2, padx=(10, 24), pady=(10, 0))
@@ -409,17 +495,19 @@ class App:
         tk.Label(other, text="Anderes Modell", bg=BG, fg=MUTED, font=small).pack(side="left")
         self.custom = tk.Entry(other, bg=PANEL, fg=FG, insertbackground=FG, relief="flat", bd=0, highlightthickness=0, font=small, width=30)
         self.custom.pack(side="left", padx=8, ipady=4)
-        self.custom_button = tk.Button(other, text="Herunterladen", command=lambda: self.start_pull(self.custom.get().strip()),
+        self.custom_button = tk.Button(other, text="Herunterladen", command=self.custom_action,
                                        bg=PANEL, fg=FG, activebackground="#333333", activeforeground=FG,
                                        disabledforeground=MUTED, relief="flat", bd=0, highlightthickness=0,
                                        font=small, padx=12, pady=4, cursor="hand2")
         self.custom_button.pack(side="left")
         tk.Label(other, text="Name von ollama.com/library, z. B. llama3.1:8b", bg=BG, fg=MUTED, font=small).pack(side="left", padx=10)
         self.pull_status = tk.Label(d, text="", bg=BG, fg=MUTED, font=small, anchor="w", justify="left")
-        self.pull_status.grid(row=last + 1, column=0, columnspan=5, sticky="we", padx=24, pady=(12, 0))
+        self.extra = tk.Frame(d, bg=BG)
+        self.extra.grid(row=last + 1, column=0, columnspan=5, sticky="we", padx=24)
+        self.pull_status.grid(row=last + 2, column=0, columnspan=5, sticky="we", padx=24, pady=(12, 0))
         tk.Label(d, text="Größen und Anforderungen sind Richtwerte. Ohne passende Grafikkarte läuft ein Modell über den RAM, "
                          "nur deutlich langsamer.", bg=BG, fg=MUTED, font=("Segoe UI", 9)).grid(
-            row=last + 2, column=0, columnspan=5, sticky="w", padx=24, pady=(6, 18))
+            row=last + 3, column=0, columnspan=5, sticky="w", padx=24, pady=(6, 18))
         self._refresh_dialog()
 
     def _refresh_dialog(self) -> None:
@@ -430,14 +518,72 @@ class App:
         for name, _, need_vram, need_ram, _ in CATALOG:
             button, fit = self.rows[name]
             text = verdict(need_vram, need_ram, *self.memory)
-            fit.config(text=("Auf deinem Rechner: " + text) if text else "", fg=colors[text])
-            if name in self.installed:
-                button.config(text="Installiert ✓", state="disabled")
-            elif self.pulling == name:
-                button.config(text="Lädt …", state="disabled")
+            parts = (["Installiert"] if name in self.installed else []) + (["Auf deinem Rechner: " + text] if text else [])
+            fit.config(text="  ·  ".join(parts), fg=colors[text])
+            if self.pulling == name:
+                button.config(text="Abbrechen", state="normal")
+            elif name in self.installed:
+                button.config(text="Löschen", state="disabled" if self.pulling else "normal")
             else:
                 button.config(text="Herunterladen", state="disabled" if self.pulling else "normal")
-        self.custom_button.config(state="disabled" if self.pulling else "normal")
+        custom_pull = bool(self.pulling) and self.pulling not in self.rows
+        self.custom_button.config(text="Abbrechen" if custom_pull else "Herunterladen",
+                                  state="normal" if custom_pull or not self.pulling else "disabled")
+        for child in self.extra.winfo_children():
+            child.destroy()
+        others = [m for m in self.installed if m not in self.rows]
+        if others:
+            tk.Label(self.extra, text="Weitere installierte Modelle", bg=BG, fg=MUTED,
+                     font=("Segoe UI", 10)).grid(row=0, column=0, columnspan=2, sticky="w", pady=(18, 4))
+        for i, name in enumerate(others, start=1):
+            tk.Label(self.extra, text=name, bg=BG, fg=FG, font=("Segoe UI", 10, "bold")).grid(row=i, column=0, sticky="w", pady=3)
+            tk.Button(self.extra, text="Löschen", command=lambda n=name: self.delete(n), bg=PANEL, fg=FG,
+                      activebackground="#333333", activeforeground=FG, disabledforeground=MUTED, relief="flat", bd=0,
+                      highlightthickness=0, font=("Segoe UI", 10), padx=12, pady=3, cursor="hand2",
+                      state="disabled" if self.pulling else "normal").grid(row=i, column=1, padx=16, pady=3)
+
+    def row_action(self, name: str) -> None:
+        if self.pulling == name:
+            self.cancel_pull.set()
+            self._pull_message(f"{name}: Download wird abgebrochen …")
+        elif name in self.installed:
+            self.delete(name)
+        else:
+            self.start_pull(name)
+
+    def custom_action(self) -> None:
+        if self.pulling:
+            self.cancel_pull.set()
+            self._pull_message(f"{self.pulling}: Download wird abgebrochen …")
+        else:
+            self.start_pull(self.custom.get().strip())
+
+    def delete(self, name: str) -> None:
+        if self.pulling:
+            return
+        if self.busy:
+            self._pull_message("Gerade läuft ein Umschreiben. Danach noch einmal klicken.")
+            return
+        size = next((" Das gibt rund " + f"{row[1]:g}".replace(".", ",") + " GB frei." for row in CATALOG if row[0] == name), "")
+        parent = self.dialog if self.dialog and self.dialog.winfo_exists() else self.root
+        if not messagebox.askyesno("Modell löschen", f"{name} wirklich löschen?{size}", parent=parent):
+            return
+
+        def work() -> None:
+            try:
+                delete_model(name, self.url)
+                self.events.put(("deleted", (name, list_models(self.url))))
+            except OllamaError as e:
+                self.events.put(("pull_error", str(e)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_deleted(self, value: tuple[str, list[str]]) -> None:
+        name, models = value
+        self._set_models(models)
+        self._pull_message(f"{name} ist gelöscht.")
+        if not models:
+            self.status.config(text='Kein Modell installiert. Klick oben auf "Modelle …" und lad eins herunter.', fg=ACCENT)
 
     def _pull_message(self, text: str, color: str = MUTED) -> None:
         if self.dialog and self.dialog.winfo_exists():
@@ -452,6 +598,7 @@ class App:
             self._pull_message(f"{name} ist schon installiert.")
             return
         self.pulling = name
+        cancel = self.cancel_pull = threading.Event()
         self._refresh_dialog()
         self._pull_message(f"{name}: Download startet …")
 
@@ -464,8 +611,10 @@ class App:
                     self.events.put(("pull_progress", (name, percent)))
 
             try:
-                pull_model(name, self.url, progress)
+                pull_model(name, self.url, progress, cancel)
                 self.events.put(("pulled", (name, list_models(self.url))))
+            except PullCancelled as e:
+                self.events.put(("pull_cancelled", str(e)))
             except OllamaError as e:
                 self.events.put(("pull_error", str(e)))
 
@@ -485,6 +634,77 @@ class App:
         self.pulling = None
         self._refresh_dialog()
         self._pull_message(message, ACCENT)
+
+    def _on_pull_cancelled(self, message: str) -> None:
+        self.pulling = None
+        self._refresh_dialog()
+        self._pull_message(message)
+
+    def check_update(self) -> None:
+        if self.updating:
+            return
+        self.updating = True
+        self.update_button.config(state="disabled")
+        self.status.config(text="Suche nach einer neueren Version …", fg=MUTED)
+
+        def work() -> None:
+            try:
+                self.events.put(("update_checked", latest_build()))
+            except UpdateError as e:
+                self.events.put(("update_error", str(e)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_done(self, text: str, color: str = MUTED) -> None:
+        self.updating = False
+        self.update_button.config(state="normal")
+        self.status.config(text=text, fg=color)
+
+    def _on_update_error(self, message: str) -> None:
+        self._update_done(message, ACCENT)
+
+    def _on_update_checked(self, latest: str) -> None:
+        if latest == BUILD:
+            self._update_done("Du hast die neueste Version.")
+        elif not getattr(sys, "frozen", False):
+            self._update_done(f"Diese Kopie läuft aus dem Quelltext und aktualisiert sich nicht selbst. "
+                              f"Die aktuelle Version: github.com/{REPO}")
+        elif not messagebox.askyesno("Update", "Es gibt eine neuere Version. Jetzt herunterladen und neu starten?",
+                                     parent=self.root):
+            self._update_done("Update abgebrochen. Es gibt eine neuere Version.")
+        else:
+            target = sys.executable + ".new"
+
+            def work() -> None:
+                last = [-1]
+
+                def progress(percent: int) -> None:
+                    if percent != last[0]:
+                        last[0] = percent
+                        self.events.put(("update_progress", percent))
+
+                try:
+                    download_file(EXE_URL, target, progress)
+                    self.events.put(("update_ready", target))
+                except UpdateError as e:
+                    self.events.put(("update_error", str(e)))
+
+            threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_progress(self, percent: int) -> None:
+        self.status.config(text=f"Lade Update … {percent} %", fg=MUTED)
+
+    def _on_update_ready(self, new: str) -> None:
+        try:
+            swap_executable(sys.executable, new)
+            # Ohne das erbt die neue .exe das Arbeitsverzeichnis der alten, das beim Beenden verschwindet.
+            env = {k: v for k, v in os.environ.items() if k != "_MEIPASS2"}
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            subprocess.Popen([sys.executable], env=env)
+        except OSError as e:
+            self._update_done(f"Das Update ließ sich nicht einspielen ({e}). Die App bleibt, wie sie ist.", ACCENT)
+            return
+        self.root.destroy()
 
     def _on_result(self, value: tuple[str, str, float]) -> None:
         source, result, seconds = value
@@ -560,6 +780,8 @@ def main() -> None:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
+    if getattr(sys, "frozen", False):
+        cleanup_old(sys.executable)
     root = tk.Tk()
     App(root)
     root.mainloop()

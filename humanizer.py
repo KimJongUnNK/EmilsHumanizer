@@ -1,5 +1,5 @@
 """Humanizer als Desktop-App: schreibt KI-Texte lokal über Ollama so um, dass sie menschlich klingen.
-Braucht nur Python und Ollama, keine weiteren Pakete. Start: pythonw humanizer.py
+Braucht nur Ollama. Als fertige Humanizer.exe oder mit Python: pythonw humanizer.py
 """
 import difflib
 import json
@@ -51,6 +51,16 @@ AI_TELLS = [
     "ermöglicht es", "stellt sicher",
 ]
 
+# Download in GB, nötiger Grafikspeicher in GB, nötiger RAM in GB ohne passende Grafikkarte. Richtwerte.
+CATALOG = [
+    ("gemma3:1b", 0.8, 2, 4, "Nur zum Ausprobieren. Deutsch holprig."),
+    ("gemma3:4b", 3.3, 4, 8, "Schnell, brauchbares Deutsch."),
+    ("gemma3:12b", 8.1, 10, 16, "Empfehlung: gutes Deutsch bei vertretbarem Tempo."),
+    ("mistral-nemo:12b", 7.1, 10, 16, "Alternative zu gemma3:12b, etwas kleiner."),
+    ("mistral-small3.2:24b", 15, 18, 32, "Sehr gutes Deutsch, braucht eine starke Grafikkarte."),
+    ("gemma3:27b", 17, 20, 32, "Beste Qualität der Liste, auf normalen Rechnern langsam."),
+]
+
 MONTHS = "Januar|Jänner|Februar|Feber|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember"
 ABBREVIATIONS = re.compile(
     r"\b(z\.\s?B|d\.\s?h|u\.\s?a|o\.\s?ä|u\.\s?U|bzw|bspw|usw|ca|Nr|vgl|etc|evtl|ggf|inkl|exkl|sog|Dr|Prof|Abb|Mio|Mrd|St)\."
@@ -59,6 +69,7 @@ NUMBER_DOT = re.compile(rf"(\d)\.(?=\d|\s+[a-zäöü]|\s+(?:{MONTHS})\b)")
 
 BG, PANEL, FG, MUTED, ACCENT = "#141414", "#232323", "#f2f2f2", "#9a9a9a", "#ff4b4b"
 ADDED, REMOVED = "#1f4d2e", "#5a2326"
+GOOD = "#5fd38d"
 
 
 def sentences(text: str) -> list[str]:
@@ -139,7 +150,8 @@ def ensure_ollama(url: str = OLLAMA_URL, wait: int = 15) -> list[str]:
         subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except OSError as e:
-        raise OllamaUnreachable("Ollama ist nicht installiert. Im Terminal: winget install Ollama.Ollama") from e
+        raise OllamaUnreachable("Ollama ist nicht installiert. Lade es von ollama.com/download, installiere es "
+                                "und starte den Humanizer neu.") from e
     for _ in range(wait):
         time.sleep(1)
         try:
@@ -147,6 +159,77 @@ def ensure_ollama(url: str = OLLAMA_URL, wait: int = 15) -> list[str]:
         except OllamaUnreachable:
             continue
     return list_models(url)
+
+
+def unload_models(url: str = OLLAMA_URL) -> int:
+    """Wirft alle geladenen Modelle aus dem Arbeits- und Grafikspeicher. Liefert, wie viele es waren."""
+    loaded = [m["name"] for m in _request(url + "/api/ps", timeout=5).get("models", [])]
+    for name in loaded:
+        _request(url + "/api/generate", {"model": name, "keep_alive": 0}, timeout=30)
+    return len(loaded)
+
+
+def pull_model(name: str, url: str = OLLAMA_URL, on_progress=lambda percent, status: None) -> None:
+    """Lädt ein Modell über Ollama herunter und meldet den Fortschritt in Prozent."""
+    body = json.dumps({"model": name, "stream": True}).encode()
+    req = urllib.request.Request(url + "/api/pull", data=body, headers={"Content-Type": "application/json"})
+    layers: dict[str, tuple[int, int]] = {}
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            for line in resp:
+                if not line.strip():
+                    continue
+                msg = json.loads(line)
+                if "error" in msg:
+                    raise OllamaError(f'Download von "{name}" fehlgeschlagen: {msg["error"]}')
+                if msg.get("digest") and msg.get("total"):
+                    layers[msg["digest"]] = (msg.get("completed", 0), msg["total"])
+                total = sum(t for _, t in layers.values())
+                on_progress(round(100 * sum(c for c, _ in layers.values()) / total) if total else 0,
+                            msg.get("status", ""))
+    except urllib.error.HTTPError as e:
+        raise OllamaError(f"Ollama meldet Fehler {e.code}: {e.read().decode(errors='replace')}") from e
+    except (urllib.error.URLError, OSError) as e:
+        raise OllamaUnreachable("Die Verbindung zu Ollama ist abgebrochen. Download noch einmal starten.") from e
+
+
+def system_memory() -> tuple[float | None, float | None]:
+    """(RAM, Grafikspeicher) dieses Rechners in GB. None, wenn sich ein Wert nicht ermitteln lässt."""
+    ram = vram = None
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [
+                    (n, ctypes.c_ulonglong) for n in ("total", "avail", "page_total", "page_avail",
+                                                      "virtual_total", "virtual_avail", "extended")]
+
+            status = MemoryStatus()
+            status.length = ctypes.sizeof(MemoryStatus)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+            ram = status.total / 1024 ** 3
+        else:
+            ram = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024 ** 3
+    except Exception:
+        pass
+    try:  # nur NVIDIA-Karten, andere bleiben unbekannt
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=5,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        vram = max(float(x) for x in out.split()) / 1024
+    except Exception:
+        pass
+    return ram, vram
+
+
+def verdict(need_vram: float, need_ram: float, ram: float | None, vram: float | None) -> str:
+    """Einschätzung, wie ein Modell auf diesem Rechner läuft. Leer, wenn der RAM unbekannt ist."""
+    if vram is not None and round(vram) >= need_vram:
+        return "läuft flüssig"
+    if ram is None:
+        return ""
+    return "läuft, aber langsamer" if round(ram) >= need_ram else "zu groß für diesen Rechner"
 
 
 def humanize(text: str, style: str, model: str, url: str = OLLAMA_URL) -> str:
@@ -164,6 +247,11 @@ class App:
     def __init__(self, root: tk.Tk, url: str = OLLAMA_URL):
         self.root, self.url = root, url
         self.events: queue.Queue = queue.Queue()
+        self.installed: list[str] = []
+        self.memory: tuple[float | None, float | None] = (None, None)
+        self.busy = False
+        self.pulling: str | None = None
+        self.dialog: tk.Toplevel | None = None
         root.title("Humanizer")
         root.geometry("1200x760")
         root.minsize(800, 520)
@@ -185,7 +273,10 @@ class App:
         bar.pack(fill="x", padx=24)
         tk.Label(bar, text="Modell", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
         self.model = ttk.Combobox(bar, state="readonly", width=28, font=("Segoe UI", 10))
-        self.model.pack(side="left", padx=(8, 24))
+        self.model.pack(side="left", padx=8)
+        tk.Button(bar, text="Modelle …", command=self.open_models, bg=PANEL, fg=FG, activebackground="#333333",
+                  activeforeground=FG, relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
+                  padx=12, pady=4, cursor="hand2").pack(side="left", padx=(0, 24))
         tk.Label(bar, text="Stil", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
         self.style = ttk.Combobox(bar, state="readonly", width=14, values=list(STYLES), font=("Segoe UI", 10))
         self.style.current(0)
@@ -201,6 +292,10 @@ class App:
                               activebackground="#333333", activeforeground=FG, relief="flat", bd=0, highlightthickness=0,
                               font=("Segoe UI", 11), padx=18, pady=8, cursor="hand2")
         self.copy.pack(side="left", padx=10)
+        self.clear = tk.Button(bottom, text="Cache leeren", command=self.clear_cache, bg=PANEL, fg=FG,
+                               activebackground="#333333", activeforeground=FG, relief="flat", bd=0, highlightthickness=0,
+                               font=("Segoe UI", 11), padx=18, pady=8, cursor="hand2")
+        self.clear.pack(side="left")
         self.status = tk.Label(bottom, text="Suche Ollama …", bg=BG, fg=MUTED, font=("Segoe UI", 10), anchor="w")
         self.status.pack(side="left", fill="x", expand=True, padx=8)
 
@@ -236,30 +331,167 @@ class App:
         self.root.after(100, self._poll)
 
     def _load_models(self) -> None:
+        self.events.put(("memory", system_memory()))
         try:
             self.events.put(("models", ensure_ollama(self.url)))
         except OllamaError as e:
             self.events.put(("error", str(e)))
 
-    def _on_models(self, models: list[str]) -> None:
-        if not models:
-            self.status.config(text=f"Kein Modell installiert. Im Terminal: ollama pull {PREFERRED_MODEL}", fg=ACCENT)
-            return
+    def _on_memory(self, memory: tuple[float | None, float | None]) -> None:
+        self.memory = memory
+        self._refresh_dialog()
+
+    def _set_models(self, models: list[str]) -> None:
+        self.installed = models
         self.model.config(values=models)
-        self.model.set(PREFERRED_MODEL if PREFERRED_MODEL in models else models[0])
-        self.go.config(state="normal")
-        self.status.config(text="Bereit. Text einfügen und Umschreiben klicken (oder Strg+Enter).", fg=MUTED)
+        if self.model.get() not in models:
+            self.model.set(PREFERRED_MODEL if PREFERRED_MODEL in models else models[0] if models else "")
+        self._sync_go()
+        self._refresh_dialog()
+
+    def _sync_go(self) -> None:
+        self.go.config(state="normal" if self.installed and not self.busy else "disabled")
+
+    def _on_models(self, models: list[str]) -> None:
+        self._set_models(models)
+        if models:
+            self.status.config(text="Bereit. Text einfügen und Umschreiben klicken (oder Strg+Enter).", fg=MUTED)
+        else:
+            self.status.config(text='Kein Modell installiert. Klick oben auf "Modelle …" und lad eins herunter.', fg=ACCENT)
 
     def _on_error(self, message: str) -> None:
         self.status.config(text=message, fg=ACCENT)
-        if self.model.get():
-            self.go.config(state="normal")
+        self.clear.config(state="normal")
+        self.busy = False
+        self._sync_go()
+
+    def _machine_text(self) -> str:
+        ram, vram = self.memory
+        if ram is None:
+            return "Dein Rechner: Speicher konnte nicht ermittelt werden."
+        gpu = f"{round(vram)} GB Grafikspeicher" if vram is not None else "keine NVIDIA-Grafikkarte erkannt"
+        return f"Dein Rechner: {round(ram)} GB RAM, {gpu}"
+
+    def open_models(self) -> None:
+        if self.dialog and self.dialog.winfo_exists():
+            self.dialog.lift()
+            return
+        d = self.dialog = tk.Toplevel(self.root)
+        d.title("Modelle")
+        d.configure(bg=BG)
+        d.transient(self.root)
+        d.resizable(False, False)
+        small, bold = ("Segoe UI", 10), ("Segoe UI", 10, "bold")
+        tk.Label(d, text="MODELLE", bg=BG, fg=FG, font=("Segoe UI", 20, "bold")).grid(
+            row=0, column=0, columnspan=5, sticky="w", padx=24, pady=(18, 0))
+        self.machine = tk.Label(d, bg=BG, fg=MUTED, font=small)
+        self.machine.grid(row=1, column=0, columnspan=5, sticky="w", padx=24, pady=(0, 12))
+        for col, head in enumerate(["Modell", "Download", "Braucht", "Beschreibung"]):
+            tk.Label(d, text=head, bg=BG, fg=MUTED, font=small).grid(row=2, column=col, sticky="w", padx=(24 if col == 0 else 10, 10))
+        self.rows: dict[str, tuple[tk.Button, tk.Label]] = {}
+        for i, (name, size, need_vram, need_ram, note) in enumerate(CATALOG):
+            row = 3 + 2 * i
+            tk.Label(d, text=name, bg=BG, fg=FG, font=bold).grid(row=row, column=0, sticky="w", padx=(24, 10), pady=(10, 0))
+            tk.Label(d, text=f"{size:g} GB".replace(".", ","), bg=BG, fg=FG, font=small).grid(row=row, column=1, sticky="w", padx=10, pady=(10, 0))
+            tk.Label(d, text=f"{need_vram} GB Grafikspeicher\noder {need_ram} GB RAM (langsamer)", bg=BG, fg=FG, font=small,
+                     justify="left").grid(row=row, column=2, rowspan=2, sticky="nw", padx=10, pady=(10, 0))
+            tk.Label(d, text=note, bg=BG, fg=FG, font=small).grid(row=row, column=3, sticky="w", padx=10, pady=(10, 0))
+            fit = tk.Label(d, bg=BG, font=small)
+            fit.grid(row=row + 1, column=3, sticky="w", padx=10)
+            button = tk.Button(d, command=lambda n=name: self.start_pull(n), bg=PANEL, fg=FG, width=14,
+                               activebackground="#333333", activeforeground=FG, disabledforeground=MUTED,
+                               relief="flat", bd=0, highlightthickness=0, font=small, pady=5, cursor="hand2")
+            button.grid(row=row, column=4, rowspan=2, padx=(10, 24), pady=(10, 0))
+            self.rows[name] = (button, fit)
+        last = 3 + 2 * len(CATALOG)
+        other = tk.Frame(d, bg=BG)
+        other.grid(row=last, column=0, columnspan=5, sticky="we", padx=24, pady=(22, 0))
+        tk.Label(other, text="Anderes Modell", bg=BG, fg=MUTED, font=small).pack(side="left")
+        self.custom = tk.Entry(other, bg=PANEL, fg=FG, insertbackground=FG, relief="flat", bd=0, highlightthickness=0, font=small, width=30)
+        self.custom.pack(side="left", padx=8, ipady=4)
+        self.custom_button = tk.Button(other, text="Herunterladen", command=lambda: self.start_pull(self.custom.get().strip()),
+                                       bg=PANEL, fg=FG, activebackground="#333333", activeforeground=FG,
+                                       disabledforeground=MUTED, relief="flat", bd=0, highlightthickness=0,
+                                       font=small, padx=12, pady=4, cursor="hand2")
+        self.custom_button.pack(side="left")
+        tk.Label(other, text="Name von ollama.com/library, z. B. llama3.1:8b", bg=BG, fg=MUTED, font=small).pack(side="left", padx=10)
+        self.pull_status = tk.Label(d, text="", bg=BG, fg=MUTED, font=small, anchor="w", justify="left")
+        self.pull_status.grid(row=last + 1, column=0, columnspan=5, sticky="we", padx=24, pady=(12, 0))
+        tk.Label(d, text="Größen und Anforderungen sind Richtwerte. Ohne passende Grafikkarte läuft ein Modell über den RAM, "
+                         "nur deutlich langsamer.", bg=BG, fg=MUTED, font=("Segoe UI", 9)).grid(
+            row=last + 2, column=0, columnspan=5, sticky="w", padx=24, pady=(6, 18))
+        self._refresh_dialog()
+
+    def _refresh_dialog(self) -> None:
+        if not (self.dialog and self.dialog.winfo_exists()):
+            return
+        self.machine.config(text=self._machine_text())
+        colors = {"läuft flüssig": GOOD, "läuft, aber langsamer": MUTED, "zu groß für diesen Rechner": ACCENT, "": MUTED}
+        for name, _, need_vram, need_ram, _ in CATALOG:
+            button, fit = self.rows[name]
+            text = verdict(need_vram, need_ram, *self.memory)
+            fit.config(text=("Auf deinem Rechner: " + text) if text else "", fg=colors[text])
+            if name in self.installed:
+                button.config(text="Installiert ✓", state="disabled")
+            elif self.pulling == name:
+                button.config(text="Lädt …", state="disabled")
+            else:
+                button.config(text="Herunterladen", state="disabled" if self.pulling else "normal")
+        self.custom_button.config(state="disabled" if self.pulling else "normal")
+
+    def _pull_message(self, text: str, color: str = MUTED) -> None:
+        if self.dialog and self.dialog.winfo_exists():
+            self.pull_status.config(text=text, fg=color)
+        else:
+            self.status.config(text=text, fg=color)
+
+    def start_pull(self, name: str) -> None:
+        if not name or self.pulling:
+            return
+        if name in self.installed:
+            self._pull_message(f"{name} ist schon installiert.")
+            return
+        self.pulling = name
+        self._refresh_dialog()
+        self._pull_message(f"{name}: Download startet …")
+
+        def work() -> None:
+            last = [-1]
+
+            def progress(percent: int, status: str) -> None:
+                if percent != last[0]:
+                    last[0] = percent
+                    self.events.put(("pull_progress", (name, percent)))
+
+            try:
+                pull_model(name, self.url, progress)
+                self.events.put(("pulled", (name, list_models(self.url))))
+            except OllamaError as e:
+                self.events.put(("pull_error", str(e)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_pull_progress(self, value: tuple[str, int]) -> None:
+        name, percent = value
+        self._pull_message(f"{name}: {percent} % heruntergeladen. Du kannst das Fenster offen lassen und weiterarbeiten.")
+
+    def _on_pulled(self, value: tuple[str, list[str]]) -> None:
+        name, models = value
+        self.pulling = None
+        self._set_models(models)
+        self._pull_message(f"{name} ist installiert und steht jetzt in der Modell-Auswahl.", GOOD)
+
+    def _on_pull_error(self, message: str) -> None:
+        self.pulling = None
+        self._refresh_dialog()
+        self._pull_message(message, ACCENT)
 
     def _on_result(self, value: tuple[str, str, float]) -> None:
         source, result, seconds = value
         self.output.delete("1.0", "end")
         self.output.insert("1.0", result)
-        self.go.config(state="normal")
+        self.busy = False
+        self._sync_go()
         gone, added = diff_spans(source, result)
         for start, end in added:
             self.output.tag_add("neu", f"1.0+{start}c", f"1.0+{end}c")
@@ -273,11 +505,34 @@ class App:
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
             f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))
 
+    def _on_cleared(self, count: int) -> None:
+        self.clear.config(state="normal")
+        self.status.config(fg=MUTED, text=(
+            "Es war kein Modell geladen, der Speicher ist schon frei." if count == 0 else
+            f"Speicher freigegeben: {count} Modell{'e' if count > 1 else ''} entladen. "
+            "Das nächste Umschreiben dauert dadurch etwas länger."))
+
+    def clear_cache(self) -> None:
+        """Entlädt die Modelle aus dem Speicher. Ollama hält sie sonst noch Minuten nach dem letzten Text."""
+        if self.busy:
+            self.status.config(text="Gerade läuft ein Umschreiben. Danach noch einmal klicken.", fg=MUTED)
+            return
+        self.clear.config(state="disabled")
+
+        def work() -> None:
+            try:
+                self.events.put(("cleared", unload_models(self.url)))
+            except OllamaError as e:
+                self.events.put(("error", str(e)))
+
+        threading.Thread(target=work, daemon=True).start()
+
     def run(self) -> None:
         text = self.input.get("1.0", "end").strip()
         if not text or str(self.go["state"]) == "disabled":
             return
-        self.go.config(state="disabled")
+        self.busy = True
+        self._sync_go()
         self.input.tag_remove("weg", "1.0", "end")
         self.status.config(text="Schreibe um … das kann bei langen Texten ein, zwei Minuten dauern.", fg=MUTED)
         model, style = self.model.get(), self.style.get()

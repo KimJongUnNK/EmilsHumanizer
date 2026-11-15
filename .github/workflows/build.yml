@@ -26,7 +26,15 @@ jobs:
           source = path.read_text(encoding="utf-8")
           assert 'BUILD = "dev"' in source
           path.write_text(source.replace('BUILD = "dev"', f'BUILD = "{os.environ["GITHUB_SHA"]}"'), encoding="utf-8")
-      - run: pyinstaller --onefile --windowed --name Humanizer humanizer.py
+      - run: pyinstaller --onefile --windowed --name Humanizer --add-data "beispieltexte;beispieltexte" humanizer.py
+      # Startet die fertige .exe einmal: läuft sie, trägt sie die richtige Version und stecken die Texte drin?
+      - name: Selbsttest der exe
+        shell: pwsh
+        run: |
+          Start-Process -FilePath dist\Humanizer.exe -ArgumentList '--selftest', "$PWD\selftest.json" -Wait
+          $r = Get-Content selftest.json | ConvertFrom-Json
+          $r | Format-List
+          if ($r.build -ne $env:GITHUB_SHA -or $r.sachlich -lt 20 -or $r.bericht -lt 20 -or $r.locker -lt 20) { exit 1 }
       - uses: actions/upload-artifact@v4
         with:
           name: Humanizer

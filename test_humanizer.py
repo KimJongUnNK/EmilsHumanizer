@@ -445,3 +445,136 @@ def test_app_update_laedt_und_tauscht(root, fake_ollama, monkeypatch, tmp_path):
     assert exe.stat().st_size == 200000
     assert (tmp_path / "Humanizer.old.exe").read_text() == "alt"
     assert started[0][0] == [str(exe)] and started[0][1]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+
+
+# --- Stilvorlage, eigene Texte, Fakten- und Längenprüfung ---
+import random
+
+
+def test_load_texts(tmp_path):
+    (tmp_path / "b.txt").write_text("Zweiter Text.", encoding="utf-8")
+    (tmp_path / "a.txt").write_bytes("Größe in cp1252".encode("cp1252"))
+    (tmp_path / "c.txt").write_text("   ", encoding="utf-8")
+    (tmp_path / "d.md").write_text("kein txt", encoding="utf-8")
+    (tmp_path / "e.txt").write_bytes("﻿Mit BOM".encode("utf-8"))
+    assert h.load_texts(str(tmp_path)) == ["Größe in cp1252", "Zweiter Text.", "Mit BOM"]
+    assert h.load_texts(str(tmp_path / "fehlt")) == []
+
+
+def test_excerpt_schneidet_am_satzende():
+    text = "Eins zwei drei. Vier fünf sechs sieben. Acht neun zehn elf zwölf."
+    assert h.excerpt(text, 100) == text
+    assert h.excerpt(text, 9) == "Eins zwei drei. Vier fünf sechs sieben."
+    assert h.excerpt("ein langer satz ohne punkt und ende", 3) == "ein langer satz …"
+
+
+def test_pick_examples_budget_und_pools():
+    rng = random.Random(1)
+    main = [" ".join(["haupt"] * 1000) + f" {i}" for i in range(10)]
+    side = ["neben " * 50]
+    picked = h.pick_examples([main, side], budget=600, count=3, rng=rng)
+    assert len(picked) == 3
+    assert sum(len(p.split()) for p in picked) <= 600 + 3
+    assert sum(p.startswith("haupt") for p in picked) == 2 and sum(p.startswith("neben") for p in picked) == 1
+    assert h.pick_examples([[], []]) == []
+    assert len(h.pick_examples([["nur einer"]], count=3)) == 1
+
+
+def test_style_examples_quellen():
+    groups = {"sachlich": ["Sachtext."], "bericht": ["Bericht."], "locker": ["Locker."]}
+    bundled = groups.__getitem__
+    assert h.style_examples("Aus", "Akademisch", ["Eigen."], bundled) == ([], "")
+    examples, note = h.style_examples("Meine Texte", "Akademisch", ["Eigen."], bundled)
+    assert examples == ["Eigen."] and note == ""
+    examples, note = h.style_examples("Meine Texte", "Akademisch", [], bundled)
+    assert set(examples) == {"Sachtext.", "Bericht."} and "noch nichts" in note
+    examples, _ = h.style_examples("Mitgeliefert", "Locker", ["Eigen."], bundled)
+    assert set(examples) == {"Locker.", "Bericht."}
+    assert set(h.style_examples("Mitgeliefert", "Natürlich", [], bundled)[0]) == {"Bericht.", "Locker.", "Sachtext."}
+
+
+def test_system_prompt_mit_und_ohne_vorlage():
+    plain = h.system_prompt("Akademisch", [])
+    assert "<beispiel>" not in plain and h.STYLES["Akademisch"] in plain
+    with_examples = h.system_prompt("Akademisch", ["Ein echter Satz."])
+    assert "<beispiel>\nEin echter Satz.\n</beispiel>" in with_examples
+    assert "NIE Inhalte" in with_examples
+
+
+def test_humanize_schickt_vorlage(fake_ollama):
+    url, seen, _ = fake_ollama
+    h.humanize("Text", "Locker", "gemma3:12b", url, ["Vorbild."])
+    assert "<beispiel>\nVorbild.\n</beispiel>" in seen[-1][1]["messages"][0]["content"]
+    assert seen[-1][1]["options"]["num_ctx"] == 16384
+
+
+def test_missing_facts_und_kuerzung():
+    source = "Am 28.09.2026 kamen 150 Leute, z. B. 3,5 % mehr als 2025."
+    assert h.missing_facts(source, source) == []
+    assert h.missing_facts(source, "Am 28. September kamen 150 Leute, 3,5 % mehr als 2025.") == ["28.09.2026"]
+    assert h.missing_facts(source, "Es kamen Leute.") == ["28.09.2026", "150", "3,5", "2025"]
+    assert h.shrinkage("eins zwei drei vier", "eins zwei") == 50
+    assert h.shrinkage("", "x") == 0
+    assert h.warnings(source, source) == ""
+    warning = h.warnings("a b c d e f g h i j 7", "a b c")
+    assert "fehlt in der Ausgabe: 7" in warning and "73 % kürzer" in warning
+
+
+def test_mitgelieferte_texte():
+    counts = {g: len(h.bundled_texts(g)) for g in ("sachlich", "bericht", "locker")}
+    assert all(n >= 20 for n in counts.values()), counts
+    for g in counts:
+        for text in h.bundled_texts(g):
+            assert 100 <= len(text.split()) <= 450
+            assert "daß" not in text and "{{" not in text and "[[" not in text and "<ref" not in text
+            assert not h.re.search(r"(?i)neger|zigeun|judensau", text)
+
+
+def test_selftest(tmp_path):
+    target = tmp_path / "selftest.json"
+    h.selftest(str(target))
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["build"] == h.BUILD and data["sachlich"] >= 20
+
+
+def test_app_warnung_bei_fehlendem_datum(root, fake_ollama, monkeypatch):
+    url, _, _ = fake_ollama
+    monkeypatch.setattr(h, "user_dir", lambda: "/gibt/es/nicht")
+    app = h.App(root, url)
+    pump(root, lambda: str(app.go["state"]) == "normal")
+    assert app.source.get() == "Mitgeliefert"
+    app.input.insert("1.0", "Das Fest ist am 28.09.2026 in Dornbirn mit 300 Gästen.")
+    app.run()
+    pump(root, lambda: app.warning["text"] != "")
+    assert "28.09.2026" in app.warning["text"] and "300" in app.warning["text"]
+    app.run()
+    assert app.warning["text"] == ""
+
+
+def test_app_meine_texte_leer_gibt_hinweis(root, fake_ollama, monkeypatch, tmp_path):
+    url, seen, _ = fake_ollama
+    monkeypatch.setattr(h, "user_dir", lambda: str(tmp_path / "texte"))
+    opened = []
+    monkeypatch.setattr(h, "open_folder", opened.append)
+    app = h.App(root, url)
+    pump(root, lambda: str(app.go["state"]) == "normal")
+    app.source.set("Meine Texte")
+    app.input.insert("1.0", "Kurz. Und dann ein deutlich längerer Satz hinterher.")
+    app.run()
+    pump(root, lambda: "noch nichts" in app.warning["text"])
+    assert "<beispiel>" in seen[-1][1]["messages"][0]["content"]
+    app.open_own_texts()
+    assert opened == [str(tmp_path / "texte")]
+
+
+def test_app_waehlt_meine_texte_wenn_vorhanden(root, fake_ollama, monkeypatch, tmp_path):
+    url, seen, _ = fake_ollama
+    (tmp_path / "hausarbeit.txt").write_text("Mein eigener Satz aus der Hausarbeit.", encoding="utf-8")
+    monkeypatch.setattr(h, "user_dir", lambda: str(tmp_path))
+    app = h.App(root, url)
+    assert app.source.get() == "Meine Texte"
+    pump(root, lambda: str(app.go["state"]) == "normal")
+    app.input.insert("1.0", "Text")
+    app.run()
+    pump(root, lambda: seen[-1][0] == "/api/chat")
+    assert "Mein eigener Satz aus der Hausarbeit." in seen[-1][1]["messages"][0]["content"]

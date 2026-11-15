@@ -32,7 +32,10 @@ SYSTEM = """Du schreibst deutsche Texte so um, dass sie klingen, als hätte sie 
 - Die Ausgabe ist immer Deutsch. Inhalt, Fakten, Zahlen und Zitate bleiben exakt erhalten. Erfinde nichts dazu:
   keine neuen Fakten, Zahlen, Beispiele, Ursachen oder Folgen, die nicht in der Vorlage stehen. Das gilt besonders
   neben Quellenangaben, denn was bei "(vgl. …)" steht, muss genau so aus der Vorlage stammen.
-- Jede Zahl und jedes Datum aus der Vorlage steht auch in der Ausgabe, in derselben Schreibweise.
+- Jede Zahl und jedes Datum aus der Vorlage steht auch in der Ausgabe, in derselben Schreibweise, mit Einheit.
+- Ändere keine Ursache-Wirkung-Beziehungen und keine Zuständigkeiten. Was eine Vorschrift verlangt, bleibt eine
+  Vorschrift. Was eine Studie zeigt, bleibt bei der Studie. Einschränkungen wie Orte, Zeiträume und Gruppen bleiben.
+- Jede Quellenangabe bleibt bei genau der Aussage, die sie belegt. Sag nichts zweimal.
 - Die Länge bleibt ungefähr gleich. Lass keine Aussage weg. Wenn du eine Floskel streichst, sag dasselbe
   konkreter, statt es ersatzlos wegzulassen.
 - Quellenangaben wie "(vgl. Berger 2021, S. 45)" bleiben Zeichen für Zeichen erhalten.
@@ -106,11 +109,17 @@ ADDED, REMOVED = "#1f4d2e", "#5a2326"
 GOOD = "#5fd38d"
 
 
+def _mask(text: str) -> str:
+    """Nimmt die Punkte aus Abkürzungen und Datumsangaben, damit sie kein Satzende vortäuschen."""
+    return NUMBER_DOT.sub(r"\1", ABBREVIATIONS.sub(lambda m: m.group(1).replace(".", ""), text))
+
+
 def sentences(text: str) -> list[str]:
-    """Zerlegt in Sätze, ohne an Abkürzungen (z. B., bzw.) oder Datumsangaben (28.09.) zu trennen."""
-    masked = ABBREVIATIONS.sub(lambda m: m.group(1).replace(".", ""), text)
-    masked = NUMBER_DOT.sub(r"\1", masked)
-    return [s for s in re.split(r"(?<=[.!?…])\s+", masked.strip()) if s]
+    """Zerlegt in Sätze, ohne an Abkürzungen (z. B., bzw.) oder Datumsangaben (28.09.) zu trennen.
+
+    Die Sätze kommen maskiert zurück, also ohne diese Punkte. Zum Vergleich mit dem Original _mask() verwenden.
+    """
+    return [s for s in re.split(r"(?<=[.!?…])\s+", _mask(text).strip()) if s]
 
 
 def burstiness(text: str) -> float:
@@ -451,9 +460,24 @@ def crutches(result: str) -> list[str]:
 CITATION = re.compile(r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)", re.I)
 
 
+def citation_parts(citation: str) -> tuple[list[str], list[str]]:
+    """Autorennamen und Zahlen (Jahr, Seite) einer Quellenangabe wie "(vgl. Hofer/Lindner 2019, S. 112)"."""
+    inner = re.sub(r"^\((?:vgl\.|siehe|s\.|nach|zit\. n\.)\s*", "", citation, flags=re.I).rstrip(")")
+    authors = [w for w in re.findall(r"[A-ZÄÖÜ][\wäöüß-]+", inner) if w not in ("S", "Vgl")]
+    return authors, re.findall(r"\d+", inner)
+
+
+def narrative_citation(citation: str, result: str) -> bool:
+    """Steht die Quelle als Fließtext da, etwa "wie Hofer und Lindner (2019, S. 112) zeigen"? Das ist gültig."""
+    authors, numbers = citation_parts(citation)
+    return bool(authors) and any(all(a in s for a in authors) and all(n in s for n in numbers)
+                                 for s in sentences(result))
+
+
 def missing_citations(source: str, result: str) -> list[str]:
-    """Quellenangaben wie "(vgl. Berger 2021, S. 45)", die nicht mehr Zeichen für Zeichen in der Ausgabe stehen."""
-    return [c for c in dict.fromkeys(CITATION.findall(source)) if c not in result]
+    """Quellenangaben wie "(vgl. Berger 2021, S. 45)", die weder wörtlich noch als Fließtext-Zitat mit denselben
+    Autoren, Jahr und Seite in der Ausgabe stehen."""
+    return [c for c in dict.fromkeys(CITATION.findall(source)) if c not in result and not narrative_citation(c, result)]
 
 
 def doubled_citations(source: str, result: str) -> list[str]:
@@ -559,23 +583,38 @@ def habits(text: str) -> list[str]:
     return [name for pattern, name in HABITS if pattern.search(text)]
 
 
-def paragraph_request(paragraph: str, plan: list[int], avoid: list[str] | None = None) -> str:
-    facts = list(dict.fromkeys(CITATION.findall(paragraph) + FACT.findall(paragraph)))
+def paragraph_request(paragraph: str, plan: list[int], avoid: list[str] | None = None,
+                      qualifiers: list[str] | None = None) -> str:
+    cited = {_mask(c): c for c in CITATION.findall(paragraph)}
+    claims = "".join(f'Die Quellenangabe {c} belegt diese Aussage und bleibt bei ihr: "{CITATION.sub("", s.replace(m, "")).strip()}"\n'
+                     for s in sentences(paragraph) for m, c in cited.items() if m in s)
+    required = list(dict.fromkeys(CITATION.findall(paragraph) + [surface for _, _, surface in facts(paragraph)]))
     lines = "\n".join(f"Satz {i}: etwa {n} Wörter" for i, n in enumerate(plan, start=1))
     return (f"Schreib diesen Absatz um.\n\nBauplan: genau {len(plan)} Sätze.\n{lines}\n\n"
             "So kommst du auf den Bauplan: Sätze zusammenlegen (mit \"obwohl\", \"während\", \"sodass\", "
             "\"wodurch\" oder Relativsätzen), lange Sätze teilen, die Reihenfolge der Aussagen im Absatz ändern, "
             "ein anderes Subjekt wählen, aktiv statt passiv. Kein Satz darf so bleiben, wie er in der Vorlage steht.\n"
             + ("Diese Angaben müssen wörtlich vorkommen, Zahlen als Ziffern wie in der Vorlage: "
-               + "; ".join(facts) + "\n" if facts else "")
+               + "; ".join(required) + "\n" if required else "")
+            + ("Diese Einschränkungen müssen erhalten bleiben: " + "; ".join(qualifiers) + "\n" if qualifiers else "")
+            + claims
             + ("Diese Wendungen stehen schon in früheren Absätzen, verwende sie hier nicht: " + ", ".join(avoid) + "\n"
                if avoid else "")
             + "Füge nichts hinzu, was nicht im Absatz steht.\n\n"
             f"Absatz:\n{paragraph}")
 
 
-def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[str] | None = None) -> list[str]:
+def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[str] | None = None,
+                       qualifiers: list[str] | None = None) -> list[str]:
     found = []
+    lost = missing_qualifiers(qualifiers or [], result)
+    if lost:
+        found.append("Diese Einschränkungen aus der Vorlage fehlen und müssen rein: " + "; ".join(lost) + ".")
+    for citation, claim in misplaced_citations(source, result):
+        found.append(f'Die Quellenangabe {citation} steht bei der falschen Aussage. Sie belegt "{claim}" '
+                     "und muss bei genau diesem Inhalt stehen.")
+    for sentence in repeated_sentences(result):
+        found.append(f'Dieser Satz wiederholt, was schon dasteht, streich ihn oder sag etwas anderes: "{sentence[:70]}…"')
     repeated = [h for h in habits(result) if h in (avoid or [])]
     if repeated:
         found.append("Diese Wendungen stehen schon in früheren Absätzen, formuliere hier anders: " + ", ".join(repeated) + ".")
@@ -608,40 +647,50 @@ def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[st
     return found
 
 
-def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str] | None = None) -> float:
+def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str] | None = None,
+                      qualifiers: list[str] | None = None) -> float:
     words, target = len(result.split()), len(source.split())
+    fidelity = 20 * len(missing_qualifiers(qualifiers or [], result)) + 25 * len(misplaced_citations(source, result)) \
+        + 10 * len(repeated_sentences(result))
     repeated = len([h for h in habits(result) if h in (avoid or [])])
     off = max(0.0, abs(words - target) / max(target, 1) - 0.2) * 100
     return (25 * (len(missing_facts(source, result)) + len(added_facts(source, result))
                   + len(missing_citations(source, result)) + len(doubled_citations(source, result)))
             + off + 15 * min(plan_fit(plan, result), 1.0) + 8 * len(unchanged_sentences(source, result))
-            + 5 * tell_count(result) + 5 * len(crutches(result)) + 5 * repeated)
+            + 5 * tell_count(result) + 5 * len(crutches(result)) + 5 * repeated + fidelity)
+
+
+def flatten(paragraph: str) -> str:
+    """Zeilenumbrüche, die das Modell mitten in einen Absatz setzt, werden zu Leerzeichen."""
+    return re.sub(r"\s*\n+\s*", " ", paragraph).strip()
 
 
 def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 2,
-                      rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int]:
+                      rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
     """Schreibt einen Absatz nach Bauplan um und wiederholt bis zu retries-mal mit konkreter Rückmeldung.
 
-    Zurück kommt die beste Fassung und wie viele Nachbesserungen es gebraucht hat.
+    Vorher sucht die App die Einschränkungen des Absatzes heraus (Orte, Zeiträume, Gruppen), die erhalten bleiben
+    müssen. Zurück kommen die beste Fassung, die Zahl der Nachbesserungen und diese Einschränkungen.
     """
+    qualifiers = extract_qualifiers(paragraph)
     plan, example = sentence_plan(paragraph, pool, rng)
     messages = [{"role": "system", "content": system_prompt(style, [example] if example else [])},
-                {"role": "user", "content": paragraph_request(paragraph, plan, avoid)}]
-    current = _chat(model, url, messages)
-    best, best_score, extra = current, paragraph_badness(paragraph, current, plan, avoid), 0
+                {"role": "user", "content": paragraph_request(paragraph, plan, avoid, qualifiers)}]
+    current = flatten(_chat(model, url, messages))
+    best, best_score, extra = current, paragraph_badness(paragraph, current, plan, avoid, qualifiers), 0
     for _ in range(retries):
-        issues = paragraph_problems(paragraph, current, plan, avoid)
+        issues = paragraph_problems(paragraph, current, plan, avoid, qualifiers)
         if not issues:
             break
-        current = _chat(model, url, messages + [
+        current = flatten(_chat(model, url, messages + [
             {"role": "assistant", "content": current},
             {"role": "user", "content": "Das passt noch nicht:\n- " + "\n- ".join(issues) +
-             "\n\nGib nur den verbesserten Absatz aus."}])
+             "\n\nGib nur den verbesserten Absatz aus."}]))
         extra += 1
-        score = paragraph_badness(paragraph, current, plan, avoid)
+        score = paragraph_badness(paragraph, current, plan, avoid, qualifiers)
         if score <= best_score:
             best, best_score = current, score
-    return best, extra
+    return best, extra, qualifiers
 
 
 def needs_rewrite(paragraph: str) -> bool:
@@ -651,17 +700,21 @@ def needs_rewrite(paragraph: str) -> bool:
 
 def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, pool: list | None = None,
                      retries: int = 2, progress=lambda done, total: None,
-                     rng: random.Random | None = None) -> tuple[str, int]:
-    """Schreibt den Text Absatz für Absatz um. Zurück kommen der Text und 1 plus die Zahl der Nachbesserungen."""
+                     rng: random.Random | None = None) -> tuple[str, int, list[str]]:
+    """Schreibt den Text Absatz für Absatz um.
+
+    Zurück kommen der Text, 1 plus die Zahl der Nachbesserungen und alle Einschränkungen, die erhalten bleiben sollten.
+    """
     paras = paragraphs(text)
     todo = [i for i, p in enumerate(paras) if needs_rewrite(p)]
-    out, extra, used = list(paras), 0, []
+    out, extra, used, qualifiers = list(paras), 0, [], []
     for step, i in enumerate(todo, start=1):
         progress(step, len(todo))
-        out[i], more = rewrite_paragraph(paras[i], style, model, url, pool or [], retries, rng, used)
+        out[i], more, found = rewrite_paragraph(paras[i], style, model, url, pool or [], retries, rng, used)
         extra += more
+        qualifiers += found
         used += [h for h in habits(out[i]) if h not in used]
-    return "\n\n".join(out), 1 + extra
+    return "\n\n".join(out), 1 + extra, qualifiers
 
 
 FACT = re.compile(r"\d+(?:[.,:/-]\d+)*")
@@ -670,18 +723,41 @@ FACT = re.compile(r"\d+(?:[.,:/-]\d+)*")
 NUMBER_WORDS = dict(zip(map(str, range(2, 13)), "zwei drei vier fünf sechs sieben acht neun zehn elf zwölf".split()))
 
 
-def missing_facts(source: str, result: str) -> list[str]:
-    """Zahlen und Daten aus dem Original, die in der Ausgabe nicht mehr vorkommen.
+UNITS = (r"%|Prozent|‰|Promille|€|Euro|dB\(A\)|km|kWh|MWh|GWh|Gigawattstunden|Megawattstunden|Kilowattstunden|"
+         r"Minuten|Stunden|Tagen|Tage|Wochen|Monaten|Monate|Jahren|Jahre|Personen|Prozentpunkte")
+FACT_WITH_UNIT = re.compile(r"(\d+(?:[.,:/-]\d+)*)(?:\s?(%s))?(?![\w(])" % UNITS)
+SAME_UNIT = {"Prozent": "%", "Promille": "‰", "Euro": "€", "GWh": "giga", "MWh": "mega", "kWh": "kilo"}
 
-    Eine ausgeschriebene kleine Zahl ("zwei" statt "2") zählt als vorhanden, sonst verlangt die Nachbesserung
-    eine Zahl, die längst dasteht, und das Modell dichtet einen Satz dazu, nur um sie unterzubringen.
+
+def facts(text: str) -> list[tuple[str, str, str]]:
+    """Zahlen mit ihrer Einheit als (Zahl, vereinheitlichte Einheit, wie es dasteht).
+
+    "60 %" und "60 Prozent" bekommen dieselbe Einheit, Wort-Einheiten werden über ihre ersten vier Buchstaben
+    verglichen, damit "Personen" und "Personen," oder "Tage" und "Tagen" gleich zählen.
     """
-    have = set(FACT.findall(result))
+    found = []
+    for m in FACT_WITH_UNIT.finditer(text):
+        unit = m.group(2) or ""
+        unit = SAME_UNIT.get(unit, unit if not unit[:1].isalpha() or unit == "dB(A)" else unit.lower()[:4])
+        found.append((m.group(1), unit, m.group(0)))
+    return found
+
+
+def missing_facts(source: str, result: str) -> list[str]:
+    """Zahlen und Daten aus dem Original, die in der Ausgabe fehlen oder ihre Einheit verloren haben.
+
+    "60 %" fehlt, wenn nur noch "60" dasteht. Eine Zahl ohne Einheit zählt als vorhanden, egal mit welcher Einheit
+    sie in der Ausgabe steht. Eine ausgeschriebene kleine Zahl ("zwei" statt "2") zählt als vorhanden, sonst
+    verlangt die Nachbesserung eine Zahl, die längst dasteht, und das Modell dichtet einen Satz dazu.
+    """
+    have = {(n, u) for n, u, _ in facts(result)}
+    numbers = {n for n, _ in have}
     missing = []
-    for fact in FACT.findall(source):
-        spelled = fact in NUMBER_WORDS and re.search(r"\b%s\b" % NUMBER_WORDS[fact], result, re.I)
-        if fact not in have and not spelled and fact not in missing:
-            missing.append(fact)
+    for number, unit, surface in facts(source):
+        spelled = number in NUMBER_WORDS and re.search(r"\b%s\b" % NUMBER_WORDS[number], result, re.I)
+        present = (number, unit) in have if unit else number in numbers
+        if not present and not spelled and surface not in missing:
+            missing.append(surface)
     return missing
 
 
@@ -692,11 +768,95 @@ def added_facts(source: str, result: str) -> list[str]:
     ist das eine erfundene Aussage.
     """
     have = set(FACT.findall(CITATION.sub(" ", source)))
+    for citation in CITATION.findall(source):
+        # Nur wenn die Klammer-Angabe aufgelöst wurde; steht sie noch da, ist ein "seit 2021" daneben erfunden.
+        if citation not in result and narrative_citation(citation, result):
+            have.update(citation_parts(citation)[1])
     added = []
     for fact in FACT.findall(CITATION.sub(" ", result)):
         if fact not in have and fact not in added:
             added.append(fact)
     return added
+
+
+STOPWORDS = set("""der die das den dem des ein eine einer einem einen eines und oder aber auch als wie bei mit von vom
+zum zur für auf aus nach über unter vor hinter neben zwischen durch gegen ohne um bis seit sich ist sind war waren wird
+werden wurde wurden hat haben kann können muss müssen soll sollen nicht nur noch schon sehr mehr dass wenn weil denn
+diese dieser dieses diesen diesem jede jeder jedes jeden allen alle immer heute dabei damit somit dort hier""".split())
+
+
+def core_stems(text: str) -> set[str]:
+    """Kernwörter als Stämme aus den ersten sechs Buchstaben, ohne Füllwörter und Quellenangaben."""
+    words = re.findall(r"[A-Za-zÄÖÜäöüß]{4,}", CITATION.sub(" ", text))
+    return {w.lower()[:6] for w in words if w.lower() not in STOPWORDS}
+
+
+def misplaced_citations(source: str, result: str) -> list[tuple[str, str]]:
+    """Quellenangaben, die jetzt bei einer anderen Aussage stehen als im Original. Liefert (Quelle, Originalsatz).
+
+    Verglichen werden die Kernwörter des Satzes, in dem die Quelle im Original steht, mit dem Satz, in dem sie jetzt
+    steht. Teilen beide weniger als 40 %, belegt die Quelle offensichtlich etwas anderes.
+    """
+    found = []
+    src_sentences, out_sentences = sentences(source), sentences(result)
+    for citation in dict.fromkeys(CITATION.findall(source)):
+        masked = _mask(citation)
+        before = next((s for s in src_sentences if masked in s), None)
+        after = next((s for s in out_sentences if masked in s), None)
+        if before is None or after is None:
+            continue
+        stems = core_stems(before)
+        if stems and len(stems & core_stems(after)) / len(stems) < 0.4:
+            found.append((citation, CITATION.sub("", before.replace(masked, "")).strip()))
+    return found
+
+
+def repeated_sentences(result: str) -> list[str]:
+    """Sätze, die inhaltlich einen früheren Satz desselben Texts wiederholen."""
+    seen, repeated = [], []
+    for sentence in sentences(result):
+        stems = core_stems(sentence)
+        if len(stems) >= 4 and any(len(stems & s) / min(len(stems), len(s)) > 0.6 for s in seen):
+            repeated.append(sentence)
+        if len(stems) >= 4:
+            seen.append(stems)
+    return repeated
+
+
+# Wendungen, die eine Aussage genau machen oder einschränken: wo, bei wem, wofür, seit wann.
+QUALIFIER_PP = re.compile(
+    r"\b(?:[Ii]n|[Ii]m|[Aa]m|[Bb]ei|[Bb]eim|[Pp]ro|[Jj]e|[Ss]eit|[Aa]us|[Ii]nnerhalb|[Aa]ußerhalb|[Ff]ür)\s+"
+    r"(?:(?:der|dem|den|des|die|das|einem|einer|eines)\s+)?(?:[a-zäöüß]+(?:en|em|er|es|e)\s+)?[A-ZÄÖÜ][\wäöüß-]+")
+QUALIFIER_ADJ = re.compile(
+    r"\b(?:europä|österreich|deutsch|schweizer|amerikan|asiat|afrikan|internation|national|region|kommunal|städt|"
+    r"ländl|bundes|landes|öffentl|privat|gesetzl|behördl|mehrtäg|eintäg|jährl|monatl|wöchentl|tägl)[a-zäöüß]*"
+    r"\s+[A-ZÄÖÜ][\wäöüß-]+")
+GENERIC_NOUNS = {"bereich", "rahmen", "hinblick", "bezug", "zeit", "folge", "lage", "weise", "laufe", "fall", "zuge",
+                 "regel", "allgemeinen", "grunde", "wesentlichen", "prinzip", "zusammenhang", "jahr"}
+
+
+def extract_qualifiers(paragraph: str) -> list[str]:
+    """Einschränkungen eines Absatzes, die beim Umschreiben nicht verloren gehen dürfen.
+
+    Zum Beispiel "In Österreich", "am Mischpult", "bei einem mehrtägigen Festival", "europäischen
+    Festivalveranstalter". Allgemeine Wendungen wie "im Bereich" oder "in der Regel" zählen nicht.
+    """
+    found = [m.group(0) for m in QUALIFIER_PP.finditer(paragraph)] + \
+            [m.group(0) for m in QUALIFIER_ADJ.finditer(paragraph)]
+    kept, stems = [], []
+    for item in found:
+        core = core_stems(item)
+        if item.split()[-1].lower() in GENERIC_NOUNS or not core or any(core <= other for other in stems):
+            continue
+        kept.append(item)
+        stems.append(core)
+    return kept
+
+
+def missing_qualifiers(qualifiers: list[str], result: str) -> list[str]:
+    """Einschränkungen, von denen mindestens ein Kernwort in der Ausgabe fehlt."""
+    have = core_stems(result)
+    return [q for q in qualifiers if not core_stems(q) <= have]
 
 
 def paragraphs(text: str) -> list[str]:
@@ -711,8 +871,15 @@ def shrinkage(source: str, result: str) -> int:
     return round(100 * (before - len(result.split())) / before) if before else 0
 
 
-def warnings(source: str, result: str) -> str:
+def warnings(source: str, result: str, qualifiers: list[str] | None = None) -> str:
     parts = []
+    lost = missing_qualifiers(qualifiers or [], result)
+    if lost:
+        parts.append("Einschränkung fehlt: " + "; ".join(lost))
+    for citation, _ in misplaced_citations(source, result):
+        parts.append(f"Quelle verrutscht: {citation}")
+    if repeated_sentences(result):
+        parts.append(f"{len(repeated_sentences(result))} Satz/Sätze wiederholt")
     gone = missing_facts(source, result)
     if gone:
         parts.append("fehlt in der Ausgabe: " + ", ".join(gone))
@@ -814,7 +981,9 @@ class App:
         self.status = tk.Label(bottom, text="Suche Ollama …", bg=BG, fg=MUTED, font=("Segoe UI", 10), anchor="w")
         self.status.pack(side="left", fill="x", expand=True, padx=8)
 
-        self.warning = tk.Label(root, text="", bg=BG, fg=ACCENT, font=("Segoe UI", 10), anchor="w", justify="left")
+        self.warning = tk.Label(root, text="", bg=BG, fg=ACCENT, font=("Segoe UI", 10), anchor="w", justify="left",
+                                wraplength=1100)
+        root.bind("<Configure>", lambda e: e.widget is root and self.warning.config(wraplength=max(400, e.width - 60)))
         self.warning.pack(side="bottom", fill="x", padx=24)
 
         panes = tk.Frame(root, bg=BG)
@@ -1156,8 +1325,8 @@ class App:
         self.status.config(fg=MUTED, text=(
             f"Leg dort .txt-Dateien mit Texten ab, die du selbst geschrieben hast. Ordner: {folder}"))
 
-    def _on_result(self, value: tuple[str, str, float, str, int]) -> None:
-        source, result, seconds, note, passes = value
+    def _on_result(self, value: tuple[str, str, float, str, int, list[str]]) -> None:
+        source, result, seconds, note, passes, qualifiers = value
         self.output.delete("1.0", "end")
         self.output.insert("1.0", result)
         self.busy = False
@@ -1175,7 +1344,7 @@ class App:
             f"{changed_share(result, added)} % neu formuliert  ·  "
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
             f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))
-        self.warning.config(text="  ".join(filter(None, [warnings(source, result), note])))
+        self.warning.config(text="  ".join(filter(None, [warnings(source, result, qualifiers), note])))
 
     def _on_cleared(self, count: int) -> None:
         self.clear.config(state="normal")
@@ -1214,10 +1383,10 @@ class App:
             start = time.time()
             pool, note = plan_pool(source, style, load_texts(user_dir()) if source == "Meine Texte" else [])
             try:
-                result, passes = humanize_checked(
+                result, passes, qualifiers = humanize_checked(
                     text, style, model, self.url, pool,
                     progress=lambda done, total: self.events.put(("progress", (done, total))))
-                self.events.put(("result", (text, result, time.time() - start, note, passes)))
+                self.events.put(("result", (text, result, time.time() - start, note, passes, qualifiers)))
             except OllamaError as e:
                 self.events.put(("error", str(e)))
 

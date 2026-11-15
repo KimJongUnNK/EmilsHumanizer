@@ -52,7 +52,7 @@ Für jeden Absatz sucht sie unter den Stilvorlagen einen echten, von einem Mensc
 Danach prüft sie jeden Absatz:
 
 - fehlen Zahlen, Daten oder Quellenangaben, oder haben Zahlen ihre Einheit verloren ("60 %" wird zu "60")? Sind welche dazugekommen, steht eine Quellenangabe doppelt?
-- fehlen Einschränkungen wie Orte, Zeiträume oder Gruppen ("in Österreich", "europäische Festivalveranstalter", "am Mischpult")? Die liest das Modell vor dem Umschreiben einmal aus dem Absatz aus. Die App behält nur Angaben, die wörtlich im Original stehen, und prüft dann selbst.
+- fehlen Einschränkungen wie Orte, Zeiträume oder Gruppen ("In Österreich", "europäischen Festivalveranstalter", "am Mischpult", "bei einem mehrtägigen Festival")? Die sucht die App vor dem Umschreiben nach festen Regeln aus dem Absatz heraus, gibt sie dem Modell als Pflichtangaben mit und prüft danach, ob ihre Kernwörter noch dastehen.
 - steht jede Quellenangabe noch bei der Aussage, die sie im Original belegt, oder ist sie zu einer anderen gerutscht?
 - wiederholt ein Satz, was schon dasteht? Eine Jahreszahl, die nur in einer Quellenangabe stand und plötzlich im Fließtext auftaucht, gilt als erfunden.
 - wiederholen sich Wendungen wie "… stellt … dar" oder "ist von … Bedeutung" über mehrere Absätze?

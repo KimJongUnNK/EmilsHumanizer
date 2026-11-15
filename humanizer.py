@@ -654,10 +654,10 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
                       rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
     """Schreibt einen Absatz nach Bauplan um und wiederholt bis zu retries-mal mit konkreter Rückmeldung.
 
-    Vorher liest das Modell die Einschränkungen des Absatzes aus (Orte, Zeiträume, Gruppen), die erhalten bleiben
+    Vorher sucht die App die Einschränkungen des Absatzes heraus (Orte, Zeiträume, Gruppen), die erhalten bleiben
     müssen. Zurück kommen die beste Fassung, die Zahl der Nachbesserungen und diese Einschränkungen.
     """
-    qualifiers = extract_qualifiers(paragraph, model, url)
+    qualifiers = extract_qualifiers(paragraph)
     plan, example = sentence_plan(paragraph, pool, rng)
     messages = [{"role": "system", "content": system_prompt(style, [example] if example else [])},
                 {"role": "user", "content": paragraph_request(paragraph, plan, avoid, qualifiers)}]
@@ -804,37 +804,34 @@ def repeated_sentences(result: str) -> list[str]:
     return repeated
 
 
-QUALIFIER_PROMPT = (
-    "Liste die Angaben auf, die die Aussagen dieses Absatzes genau machen oder einschränken: Orte, Länder, "
-    "Zeiträume, Personengruppen, Messorte, Bedingungen. Je Zeile eine Angabe, wörtlich aus dem Absatz kopiert, "
-    "höchstens acht, jede höchstens fünf Wörter. Keine Zahlen, keine Quellenangaben, keine ganzen Sätze. "
-    "Gibt es keine, antworte nur mit einem Bindestrich.")
+# Wendungen, die eine Aussage genau machen oder einschränken: wo, bei wem, wofür, seit wann.
+QUALIFIER_PP = re.compile(
+    r"\b(?:[Ii]n|[Ii]m|[Aa]m|[Bb]ei|[Bb]eim|[Pp]ro|[Jj]e|[Ss]eit|[Aa]us|[Ii]nnerhalb|[Aa]ußerhalb|[Ff]ür)\s+"
+    r"(?:(?:der|dem|den|des|die|das|einem|einer|eines)\s+)?(?:[a-zäöüß]+(?:en|em|er|es|e)\s+)?[A-ZÄÖÜ][\wäöüß-]+")
+QUALIFIER_ADJ = re.compile(
+    r"\b(?:europä|österreich|deutsch|schweizer|amerikan|asiat|afrikan|internation|national|region|kommunal|städt|"
+    r"ländl|bundes|landes|öffentl|privat|gesetzl|behördl|mehrtäg|eintäg|jährl|monatl|wöchentl|tägl)[a-zäöüß]*"
+    r"\s+[A-ZÄÖÜ][\wäöüß-]+")
+GENERIC_NOUNS = {"bereich", "rahmen", "hinblick", "bezug", "zeit", "folge", "lage", "weise", "laufe", "fall", "zuge",
+                 "regel", "allgemeinen", "grunde", "wesentlichen", "prinzip", "zusammenhang", "jahr"}
 
 
-def clean_qualifiers(reply: str, paragraph: str) -> list[str]:
-    """Behält nur Angaben, die wirklich im Absatz stehen, keine Zahlen und keine Floskeln enthalten.
+def extract_qualifiers(paragraph: str) -> list[str]:
+    """Einschränkungen eines Absatzes, die beim Umschreiben nicht verloren gehen dürfen.
 
-    So kann das Modell beim Auslesen keine eigenen Angaben einschmuggeln, die es dann später einfordert.
+    Zum Beispiel "In Österreich", "am Mischpult", "bei einem mehrtägigen Festival", "europäischen
+    Festivalveranstalter". Allgemeine Wendungen wie "im Bereich" oder "in der Regel" zählen nicht.
     """
-    kept, low = [], paragraph.lower()
-    for line in reply.splitlines():
-        item = line.strip().strip("-•*–\"'„“”‚‘` ").strip()
-        item = re.sub(r"^\d+[.)]\s*", "", item).strip()
-        if not item or not 1 <= len(item.split()) <= 5 or re.search(r"\d", item):
+    found = [m.group(0) for m in QUALIFIER_PP.finditer(paragraph)] + \
+            [m.group(0) for m in QUALIFIER_ADJ.finditer(paragraph)]
+    kept, stems = [], []
+    for item in found:
+        core = core_stems(item)
+        if item.split()[-1].lower() in GENERIC_NOUNS or not core or any(core <= other for other in stems):
             continue
-        if item.lower() not in low or any(t in item.lower() for t in AI_TELLS) or not core_stems(item):
-            continue
-        if item not in kept:
-            kept.append(item)
-    return kept[:8]
-
-
-def extract_qualifiers(paragraph: str, model: str, url: str) -> list[str]:
-    try:
-        reply = _chat(model, url, [{"role": "user", "content": QUALIFIER_PROMPT + "\n\nAbsatz:\n" + paragraph}])
-    except OllamaError:
-        return []
-    return clean_qualifiers(reply, paragraph)
+        kept.append(item)
+        stems.append(core)
+    return kept
 
 
 def missing_qualifiers(qualifiers: list[str], result: str) -> list[str]:

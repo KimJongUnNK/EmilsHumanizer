@@ -575,21 +575,13 @@ def test_quellenangaben_trennen_keinen_satz():
 
 @pytest.fixture
 def scripted_ollama():
-    """Ollama-Ersatz, der der Reihe nach vorgegebene Antworten liefert.
-
-    Fragen nach den Einschränkungen eines Absatzes beantwortet er aus `qualifiers` (Standard: keine) und zählt sie
-    weder in `seen` noch bei den Antworten mit, damit die Tests nur die Umschreib-Aufrufe sehen.
-    """
-    replies, seen, qualifiers = [], [], []
+    """Ollama-Ersatz, der der Reihe nach vorgegebene Antworten liefert."""
+    replies, seen = [], []
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            if h.QUALIFIER_PROMPT in body["messages"][-1]["content"]:
-                answer = qualifiers.pop(0) if qualifiers else "-"
-            else:
-                seen.append(body)
-                answer = replies.pop(0)
+            seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            answer = replies.pop(0)
             self.send_response(200)
             self.end_headers()
             self.wfile.write(json.dumps({"message": {"content": answer}}).encode())
@@ -599,12 +591,12 @@ def scripted_ollama():
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}", replies, seen, qualifiers
+    yield f"http://127.0.0.1:{server.server_port}", replies, seen
     server.shutdown()
 
 
 def test_app_zeigt_nachgebessert(root, scripted_ollama, monkeypatch):
-    url, replies, _, _ = scripted_ollama
+    url, replies, _ = scripted_ollama
     monkeypatch.setattr(h, "ensure_ollama", lambda url: ["m"])
     monkeypatch.setattr(h, "user_dir", lambda: "/gibt/es/nicht")
     replies += [UNIFORM[:150], VARIED, VARIED]
@@ -736,7 +728,7 @@ def test_needs_rewrite():
 
 
 def test_rewrite_paragraph_bessert_nach_und_nimmt_beste(scripted_ollama):
-    url, replies, seen, _ = scripted_ollama
+    url, replies, seen = scripted_ollama
     good = ("Bei 50.000 Gästen verursachen Licht und Ton bis zu 1,2 Gigawattstunden (vgl. Hofer 2019, S. 112), "
             "was den Energiebedarf zum Kernthema macht. Viel ist das. LED drückt den Bedarf um etwa 60 %.")
     replies += ["Kaputt ohne Zahlen. Wirklich.", good, "Wieder kaputt. Ganz."]
@@ -749,7 +741,7 @@ def test_rewrite_paragraph_bessert_nach_und_nimmt_beste(scripted_ollama):
 
 
 def test_humanize_checked_absatzweise(scripted_ollama):
-    url, replies, seen, _ = scripted_ollama
+    url, replies, seen = scripted_ollama
     text = "Überschrift ohne Punkt\n\n" + PARA + "\n\n" + LONG
     replies += ["Erster Absatz neu. Mit 50.000 und 1,2 und 60 (vgl. Hofer 2019, S. 112)."] * 3 + ["Zweiter neu. Ja."] * 3
     steps = []
@@ -786,7 +778,7 @@ def test_habits_und_wiederholung_ueber_absaetze():
 
 
 def test_humanize_checked_gibt_gewohnheiten_weiter(scripted_ollama):
-    url, replies, seen, _ = scripted_ollama
+    url, replies, seen = scripted_ollama
     replies += ["Die Lage stellt viel dar. Sonst nichts."] * 6
     h.humanize_checked(PARA + "\n\n" + LONG, "Akademisch", "m", url, [], retries=0)
     assert "stellt … dar" not in seen[0]["messages"][1]["content"]
@@ -816,32 +808,33 @@ def test_zahlen_mit_einheit():
     assert [f[2] for f in h.facts("Es sind 100 dB(A) und 1,2 GWh.")] == ["100 dB(A)", "1,2 GWh"]
 
 
-def test_einschraenkungen_filtern_und_pruefen():
-    para = ("In Österreich gilt für Veranstaltungen im Freien häufig ein Richtwert von 100 dB(A) am Mischpult. "
-            "Darüber hinaus müssen Anrainer geschützt werden.")
-    reply = "1. in Österreich\n- im Freien\n- „am Mischpult“\n- darüber hinaus\n- 100 dB(A)\n- in Wien\n-\n- ein Satz der viel zu lang ist hier"
-    found = h.clean_qualifiers(reply, para)
-    assert found == ["in Österreich", "im Freien", "am Mischpult"]
-    out = "Für Konzerte draußen gilt oft ein Richtwert von 100 dB(A) am Mischpult."
-    assert h.missing_qualifiers(found, out) == ["in Österreich", "im Freien"]
+def test_einschraenkungen_finden_und_pruefen():
+    para = ("In Österreich gilt im Freien häufig ein Richtwert von 100 dB(A) am Mischpult, im Bereich der Bühne "
+            "und in der Regel bei einem mehrtägigen Festival. Laut 38 % der europäischen Festivalveranstalter, aus dem "
+            "Jahr 2023, zwischen Publikumserlebnis und Schutz, durch technische Innovationen.")
+    found = h.extract_qualifiers(para)
+    assert found == ["In Österreich", "im Freien", "am Mischpult", "bei einem mehrtägigen Festival",
+                     "europäischen Festivalveranstalter"]
+    out = "Draußen gilt oft ein Richtwert von 100 dB(A) am Mischpult."
+    assert h.missing_qualifiers(found[:3], out) == ["In Österreich", "im Freien"]
     assert h.missing_qualifiers(["europäischen Festivalveranstalter"], "38 % der europäischen Festivalveranstaltern") == []
     assert h.missing_qualifiers(["europäischen Festivalveranstalter"], "38 % der Veranstalter") == ["europäischen Festivalveranstalter"]
 
 
 def test_einschraenkungen_landen_in_auftrag_und_rueckmeldung(scripted_ollama):
-    url, replies, seen, qualifiers = scripted_ollama
-    para = ("In Österreich gilt für Veranstaltungen im Freien häufig ein Richtwert von 100 dB(A) am Mischpult. "
+    url, replies, seen = scripted_ollama
+    para = ("In Österreich gilt bei Konzerten im Freien häufig ein Richtwert von 100 dB(A). "
             "Gleichzeitig müssen Anrainer vor Lärm geschützt werden.")
-    qualifiers.append("in Österreich\nim Freien")
-    good = ("Anrainer müssen vor Lärm geschützt werden, auch wenn in Österreich für Veranstaltungen im Freien oft ein "
-            "Richtwert von 100 dB(A) am Mischpult gilt. Eben.")
-    replies += ["Für Konzerte gilt ein Richtwert von 100 dB(A) am Mischpult. Anrainer brauchen Schutz.", good, good]
+    good = ("Anrainer müssen vor Lärm geschützt werden, auch wenn in Österreich bei Konzerten im Freien oft ein "
+            "Richtwert von 100 dB(A) gilt. Eben.")
+    replies += ["Für Konzerte gilt ein Richtwert von 100 dB(A). Anrainer brauchen Schutz.", good, good]
     result, extra, found = h.rewrite_paragraph(para, "Akademisch", "m", url, [], rng=random.Random(1))
-    assert found == ["in Österreich", "im Freien"]
-    assert "Diese Einschränkungen müssen erhalten bleiben: in Österreich; im Freien" in seen[0]["messages"][1]["content"]
-    assert "in Österreich; im Freien" in seen[1]["messages"][-1]["content"]
+    assert found == ["In Österreich", "bei Konzerten", "im Freien"]
+    assert "Diese Einschränkungen müssen erhalten bleiben: In Österreich; bei Konzerten; im Freien" in \
+        seen[0]["messages"][1]["content"]
+    assert "In Österreich; im Freien" in seen[1]["messages"][-1]["content"]
     assert result == good
-    assert "Einschränkung fehlt: in Österreich; im Freien" in h.warnings(para, "Kurz. Anders.", found)
+    assert "Einschränkung fehlt: In Österreich; bei Konzerten; im Freien" in h.warnings(para, "Kurz. Anders.", found)
 
 
 def test_verrutschte_quelle():

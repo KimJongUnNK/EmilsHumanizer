@@ -51,7 +51,10 @@ Für jeden Absatz sucht sie unter den Stilvorlagen einen echten, von einem Mensc
 
 Danach prüft sie jeden Absatz:
 
-- fehlen Zahlen, Daten oder Quellenangaben, sind welche dazugekommen oder steht eine Quellenangabe doppelt? Eine Jahreszahl, die nur in einer Quellenangabe stand und plötzlich im Fließtext auftaucht, gilt als erfunden.
+- fehlen Zahlen, Daten oder Quellenangaben, oder haben Zahlen ihre Einheit verloren ("60 %" wird zu "60")? Sind welche dazugekommen, steht eine Quellenangabe doppelt?
+- fehlen Einschränkungen wie Orte, Zeiträume oder Gruppen ("in Österreich", "europäische Festivalveranstalter", "am Mischpult")? Die liest das Modell vor dem Umschreiben einmal aus dem Absatz aus. Die App behält nur Angaben, die wörtlich im Original stehen, und prüft dann selbst.
+- steht jede Quellenangabe noch bei der Aussage, die sie im Original belegt, oder ist sie zu einer anderen gerutscht?
+- wiederholt ein Satz, was schon dasteht? Eine Jahreszahl, die nur in einer Quellenangabe stand und plötzlich im Fließtext auftaucht, gilt als erfunden.
 - wiederholen sich Wendungen wie "… stellt … dar" oder "ist von … Bedeutung" über mehrere Absätze?
 - ist der Absatz mehr als 20 % kürzer oder länger?
 - passen Satzanzahl und Satzlängen zum Bauplan?
@@ -60,7 +63,7 @@ Danach prüft sie jeden Absatz:
 
 Findet sie etwas, schickt sie dem Modell eine konkrete Rückmeldung, höchstens zweimal pro Absatz, und behält die beste Fassung. Die Statuszeile zeigt den Fortschritt ("Absatz 3 von 6") und am Ende, wie oft nachgebessert wurde. Was danach noch fehlt, erfunden oder kaum verändert ist, steht rot unter den Textfeldern.
 
-Erfundene Aussagen ohne Zahl (etwa ein dazugedichteter Grund) erkennt die Prüfung nicht. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
+Nicht erkannt werden erfundene Aussagen ohne Zahl (etwa ein dazugedichteter Grund), verdrehte Ursache und Wirkung und Wiederholungen mit ganz anderen Worten. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
 
 ## Update
 

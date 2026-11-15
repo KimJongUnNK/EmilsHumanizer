@@ -484,7 +484,7 @@ def test_missing_facts_und_kuerzung():
     source = "Am 28.09.2026 kamen 150 Leute, z. B. 3,5 % mehr als 2025."
     assert h.missing_facts(source, source) == []
     assert h.missing_facts(source, "Am 28. September kamen 150 Leute, 3,5 % mehr als 2025.") == ["28.09.2026"]
-    assert h.missing_facts(source, "Es kamen Leute.") == ["28.09.2026", "150", "3,5", "2025"]
+    assert h.missing_facts(source, "Es kamen Leute.") == ["28.09.2026", "150", "3,5 %", "2025"]
     assert h.shrinkage("eins zwei drei vier", "eins zwei") == 50
     assert h.shrinkage("", "x") == 0
     assert h.warnings(source, source) == ""
@@ -575,27 +575,36 @@ def test_quellenangaben_trennen_keinen_satz():
 
 @pytest.fixture
 def scripted_ollama():
-    """Ollama-Ersatz, der der Reihe nach vorgegebene Antworten liefert."""
-    replies, seen = [], []
+    """Ollama-Ersatz, der der Reihe nach vorgegebene Antworten liefert.
+
+    Fragen nach den Einschränkungen eines Absatzes beantwortet er aus `qualifiers` (Standard: keine) und zählt sie
+    weder in `seen` noch bei den Antworten mit, damit die Tests nur die Umschreib-Aufrufe sehen.
+    """
+    replies, seen, qualifiers = [], [], []
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
-            seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if h.QUALIFIER_PROMPT in body["messages"][-1]["content"]:
+                answer = qualifiers.pop(0) if qualifiers else "-"
+            else:
+                seen.append(body)
+                answer = replies.pop(0)
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(json.dumps({"message": {"content": replies.pop(0)}}).encode())
+            self.wfile.write(json.dumps({"message": {"content": answer}}).encode())
 
         def log_message(self, *args):
             pass
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}", replies, seen
+    yield f"http://127.0.0.1:{server.server_port}", replies, seen, qualifiers
     server.shutdown()
 
 
 def test_app_zeigt_nachgebessert(root, scripted_ollama, monkeypatch):
-    url, replies, _ = scripted_ollama
+    url, replies, _, _ = scripted_ollama
     monkeypatch.setattr(h, "ensure_ollama", lambda url: ["m"])
     monkeypatch.setattr(h, "user_dir", lambda: "/gibt/es/nicht")
     replies += [UNIFORM[:150], VARIED, VARIED]
@@ -727,12 +736,12 @@ def test_needs_rewrite():
 
 
 def test_rewrite_paragraph_bessert_nach_und_nimmt_beste(scripted_ollama):
-    url, replies, seen = scripted_ollama
+    url, replies, seen, _ = scripted_ollama
     good = ("Bei 50.000 Gästen verursachen Licht und Ton bis zu 1,2 Gigawattstunden (vgl. Hofer 2019, S. 112), "
             "was den Energiebedarf zum Kernthema macht. Viel ist das. LED drückt den Bedarf um etwa 60 %.")
     replies += ["Kaputt ohne Zahlen. Wirklich.", good, "Wieder kaputt. Ganz."]
     pool = [(36, [17, 3, 9], "Ein echter Absatz als Vorbild.")]
-    result, extra = h.rewrite_paragraph(PARA, "Akademisch", "m", url, pool, rng=random.Random(1))
+    result, extra, _ = h.rewrite_paragraph(PARA, "Akademisch", "m", url, pool, rng=random.Random(1))
     assert result == good and extra >= 1
     assert "<beispiel>\nEin echter Absatz als Vorbild.\n</beispiel>" in seen[0]["messages"][0]["content"]
     assert "Bauplan: genau 3 Sätze" in seen[0]["messages"][1]["content"]
@@ -740,11 +749,11 @@ def test_rewrite_paragraph_bessert_nach_und_nimmt_beste(scripted_ollama):
 
 
 def test_humanize_checked_absatzweise(scripted_ollama):
-    url, replies, seen = scripted_ollama
+    url, replies, seen, _ = scripted_ollama
     text = "Überschrift ohne Punkt\n\n" + PARA + "\n\n" + LONG
     replies += ["Erster Absatz neu. Mit 50.000 und 1,2 und 60 (vgl. Hofer 2019, S. 112)."] * 3 + ["Zweiter neu. Ja."] * 3
     steps = []
-    result, passes = h.humanize_checked(text, "Akademisch", "m", url, [], progress=lambda d, t: steps.append((d, t)))
+    result, passes, _ = h.humanize_checked(text, "Akademisch", "m", url, [], progress=lambda d, t: steps.append((d, t)))
     parts = h.paragraphs(result)
     assert parts[0] == "Überschrift ohne Punkt" and parts[1].startswith("Erster") and parts[2].startswith("Zweiter")
     assert steps == [(1, 2), (2, 2)] and passes == 1 + (len(seen) - 2)
@@ -777,7 +786,7 @@ def test_habits_und_wiederholung_ueber_absaetze():
 
 
 def test_humanize_checked_gibt_gewohnheiten_weiter(scripted_ollama):
-    url, replies, seen = scripted_ollama
+    url, replies, seen, _ = scripted_ollama
     replies += ["Die Lage stellt viel dar. Sonst nichts."] * 6
     h.humanize_checked(PARA + "\n\n" + LONG, "Akademisch", "m", url, [], retries=0)
     assert "stellt … dar" not in seen[0]["messages"][1]["content"]
@@ -792,3 +801,69 @@ def test_jahreszahl_aus_quellenangabe_im_text_ist_erfunden():
     doubled = "Erst (vgl. Berger 2021, S. 45), dann nochmal (vgl. Berger 2021, S. 45)."
     assert h.doubled_citations(source, doubled) == ["(vgl. Berger 2021, S. 45)"]
     assert any("öfter" in f for f in h.paragraph_problems(source, doubled, [3, 4]))
+
+
+
+# --- Inhaltstreue ---
+def test_zahlen_mit_einheit():
+    source = "Der Verbrauch sinkt um etwa 60 %, gemessen über 30 Minuten bei 100 dB(A) und maximal 2 Personen."
+    assert h.missing_facts(source, source) == []
+    assert h.missing_facts(source, source.replace("60 %", "60 Prozent")) == []
+    assert h.missing_facts(source, source.replace("60 %", "60")) == ["60 %"]
+    assert h.missing_facts(source, source.replace("30 Minuten", "30 Sekunden")) == ["30 Minuten"]
+    assert h.missing_facts(source, source.replace("2 Personen", "zwei Personen")) == []
+    assert h.missing_facts("Im Jahr 2023 stieg es.", "Laut Studie von 2023 stieg es um 4 %.") == []
+    assert [f[2] for f in h.facts("Es sind 100 dB(A) und 1,2 GWh.")] == ["100 dB(A)", "1,2 GWh"]
+
+
+def test_einschraenkungen_filtern_und_pruefen():
+    para = ("In Österreich gilt für Veranstaltungen im Freien häufig ein Richtwert von 100 dB(A) am Mischpult. "
+            "Darüber hinaus müssen Anrainer geschützt werden.")
+    reply = "1. in Österreich\n- im Freien\n- „am Mischpult“\n- darüber hinaus\n- 100 dB(A)\n- in Wien\n-\n- ein Satz der viel zu lang ist hier"
+    found = h.clean_qualifiers(reply, para)
+    assert found == ["in Österreich", "im Freien", "am Mischpult"]
+    out = "Für Konzerte draußen gilt oft ein Richtwert von 100 dB(A) am Mischpult."
+    assert h.missing_qualifiers(found, out) == ["in Österreich", "im Freien"]
+    assert h.missing_qualifiers(["europäischen Festivalveranstalter"], "38 % der europäischen Festivalveranstaltern") == []
+    assert h.missing_qualifiers(["europäischen Festivalveranstalter"], "38 % der Veranstalter") == ["europäischen Festivalveranstalter"]
+
+
+def test_einschraenkungen_landen_in_auftrag_und_rueckmeldung(scripted_ollama):
+    url, replies, seen, qualifiers = scripted_ollama
+    para = ("In Österreich gilt für Veranstaltungen im Freien häufig ein Richtwert von 100 dB(A) am Mischpult. "
+            "Gleichzeitig müssen Anrainer vor Lärm geschützt werden.")
+    qualifiers.append("in Österreich\nim Freien")
+    good = ("Anrainer müssen vor Lärm geschützt werden, auch wenn in Österreich für Veranstaltungen im Freien oft ein "
+            "Richtwert von 100 dB(A) am Mischpult gilt. Eben.")
+    replies += ["Für Konzerte gilt ein Richtwert von 100 dB(A) am Mischpult. Anrainer brauchen Schutz.", good, good]
+    result, extra, found = h.rewrite_paragraph(para, "Akademisch", "m", url, [], rng=random.Random(1))
+    assert found == ["in Österreich", "im Freien"]
+    assert "Diese Einschränkungen müssen erhalten bleiben: in Österreich; im Freien" in seen[0]["messages"][1]["content"]
+    assert "in Österreich; im Freien" in seen[1]["messages"][-1]["content"]
+    assert result == good
+    assert "Einschränkung fehlt: in Österreich; im Freien" in h.warnings(para, "Kurz. Anders.", found)
+
+
+def test_verrutschte_quelle():
+    source = ("Digitale Systeme ermöglichen eine präzisere Steuerung von Besucherströmen. Laut einer Studie setzen bereits "
+              "38 % der europäischen Festivalveranstalter derartige Systeme ein (vgl. Event Industry Report 2023, S. 9).")
+    moved = ("38 % der europäischen Festivalveranstalter setzen solche Systeme ein. Studien zeigen, dass Echtzeit-Monitoring "
+             "und Prognosemodelle die Steuerung verbessern (vgl. Event Industry Report 2023, S. 9).")
+    kept = ("Solche Systeme setzen bereits 38 % der europäischen Festivalveranstalter ein (vgl. Event Industry Report "
+            "2023, S. 9). Sie steuern Besucherströme präziser.")
+    assert h.misplaced_citations(source, source) == []
+    assert h.misplaced_citations(source, kept) == []
+    found = h.misplaced_citations(source, moved)
+    assert [c for c, _ in found] == ["(vgl. Event Industry Report 2023, S. 9)"]
+    assert "38 % der europäischen Festivalveranstalter" in found[0][1]
+    assert "belegt diese Aussage" in h.paragraph_request(source, [10, 20])
+    assert any("falschen Aussage" in f for f in h.paragraph_problems(source, moved, [12, 15]))
+    assert "Quelle verrutscht: (vgl. Event Industry Report 2023, S. 9)" in h.warnings(source, moved)
+
+
+def test_wiederholung_und_umbrueche():
+    text = ("Nachhaltigkeit und Sicherheit bilden gemeinsam das Fundament zukunftsfähiger Veranstaltungen. Kurz. "
+            "Gemeinsam bilden Sicherheit und Nachhaltigkeit das Fundament zukunftsfähiger Veranstaltungen.")
+    assert len(h.repeated_sentences(text)) == 1
+    assert h.repeated_sentences(VARIED) == []
+    assert h.flatten("Erste Zeile.\nZweite Zeile.\n\n  Dritte.") == "Erste Zeile. Zweite Zeile. Dritte."

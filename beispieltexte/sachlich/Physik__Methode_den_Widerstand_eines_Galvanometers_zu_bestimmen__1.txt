@@ -1,0 +1,17 @@
+Die vortreffliche Abhandlung Wheatstone’s im achten Hefte Ihrer schätzbaren Annalen veranlasst mich, Ihnen eine vorlängst von mir erdachte Methode zur Bestimmung des Widerstandes eines beliebigen Galvanometers mitzuteilen, welche nicht die Zuhülfenahme eines zweiten Galvanometers oder einer zweiten Elektricitätsquelle, sondern lediglich die Anwendung einer einfachen, thermo-elektrischen Kette erfordert. Obgleich es keine Schwierigkeit haben würde, den Widerstand einer solchen Kette mit Hülfe des vorhandenen Galvanometers, ohne dessen Widerstand zu kennen, zu bestimmen, so ist es doch einfacher, die Dimensionen derselben so zu nehmen, dass ihr Widerstand vernachlässigt werden kann.
+
+Sei nun, für einen gewissen constanten Temperaturunterschied der Verbindungsstellen der Kette, deren elektromotorische Kraft, der Widerstand des Galvanometers, ein beliebiger eingeschalteter Widerstand und die Stromstärke, so haben wir:
+
+Wird der Widerstand verändert und gleich , so wird die entsprechende Stromstärke:
+
+Ist für einen andern constanten Temperaturunterschied in der Kette deren elektromotorische Kraft, so kann man vermittelst eines entsprechenden Widerstandes die Stromgröße herstellen, so dass auch
+
+ist, und eben so ist die Stromgröße durch Einführung eines andern Widerstandes herzustellen, also auch:
+
+Aus diesen Gleichungen folgt durch Elimination von , , und :
+
+Es hat nicht die geringste Schwierigkeit, die Bedingungsgleichungen durch Anwendung beliebig vieler Temperaturunterschiede in der Kette und entsprechender Widerstände beliebig zu vervielfältigen, so dass auf diesem Wege in der Bestimmung von die Genauigkeit sich beliebig steigern lässt. Durch Hinzufügung noch eines Paares von Messungen würde man drei unabhängige Gleichungen für erhalten, wie es aus dem Bildungsgesetz obiger Gleichung, welcher sich die allgemeinere Form
+
+geben lässt, leicht zu erkennen ist.
+
+Wenn man es mit großen Widerständen zu tun hat, so ist es vorteilhaft, die Drahtlängen zu ermitteln, durch deren Hinzufügung oder Weglassung die Ablenkung der Nadel nicht merklich geändert wird, und die Hälfte derselben mit in Rechnung zu nehmen. Diese

@@ -1,0 +1,19 @@
+§ 1. Wenn man die Frage nach der „Ruhe oder Bewegung des Äthers“ aller spekulativen Elemente entkleidet, so lautet sie: welche Form müssen die ’schen Gleichungen für den Fall willkürlich vorgeschriebener Bewegungen erhalten? Unter „Bewegung“ ist dabei – hier wie durchweg im Folgenden – Bewegung ausgedehnter ponderabler Massen verstanden.
+
+Wir stellen die Erfahrungsthatsachen, von denen die aufzustellenden Gleichungen Rechenschaft zu geben haben, kurz zusammen:
+
+1. Electrische Erscheinungen im engeren Sinn, d. h. solche, bei denen die zeitliche Ausbreitung des Feldes (Strahlung) nicht in Frage kommt. Hier ist alles ausschliesslich von der relativen Bewegung abhängig; diese Abhängigkeit ist gegeben durch das ’sche Induktionsgesetz.
+
+2. Strahlungserscheinungen. Bei allen Beobachtungen handelt es sich um die Ausbreitung des Lichts in Körpern und Systemen von Körpern, welche eine räumlich und zeitlich gleichförmige Geschwindigkeit besitzen. „Relativ“, bezw. „absolut“ heisse, was auf einen Raum bezogen ist, der an dieser Geschwindigkeit teilnimmt, bezw. nicht teilnimmt. Die Erfahrung zeigt dann:
+
+a. In denjenigen Körpern, welche sich electromagnetisch nicht vom leeren Raum unterscheiden, ist die absolute Ausbreitung unabhängig von der Bewegung. Die relative Ausbreitung ergibt sich daher durch geometrische Zusammensetzung der für ruhende Körper geltenden Ausbreitungsgeschwindigkeit mit der negativ genommenen Körpergeschwindigkeit. In diesem Satz ist das Gesetz der Aberration enthalten.
+
+b. In den übrigen durchsichtigen Körpern erhält man die absolute Ausbreitungsgeschwindigkeit, indem man die für den Fall der Ruhe geltende Geschwindigkeit mit einem bestimmten Bruchteil der Körpergeschwindigkeit zusammensetzt. Sei die Geschwindigkeit und der Brechungsexponent dann ist dieser Bruchteil . (Fizeau’s Versuch mit strömendem Wasser.)
+
+c. Der relative Strahlengang wird durch die Bewegung nicht geändert. Insbesondere: die beobachtete Aberration ist unabhängig von der Wahl der durchsichtigen Substanzen im Fernrohr (Linsen, Füllung mit Wasser).
+
+d. Interferenzerscheinungen werden durch die Bewegung nicht beeinflusst. ( u. .)
+
+Zwischen den Sätzen, welche unter 2 als Ausdruck der Beobachtung hingestellt sind, bestehen geometrische Beziehungen: sie sind geometrisch nicht unabhängig von einander; sie sind aber zugleich in Strenge geometrisch nicht verträglich mit einander. Wir wollen als Grössen n Ordnung solche bezeichnen, welche die n Potenz des Verhältnisses der Körpergeschwindigkeit zur Lichtgeschwindigkeit als Faktor enthalten. Dann sind die Sätze unter 2 durchweg verträglich und teilweise abhängig von einander bezüglich der Grössen erster Ordnung; sie sind teilweise in Widerspruch mit einander bezüglich der Grössen zweiter Ordnung.
+
+Für die Beobachtungen andererseits gilt: diejenigen unter 1 und 2 a, b c, können als verbürgt gelten bezüglich der Grössen erster Ordnung, diejenigen unter 2d hingegen auch bezüglich der Grössen zweiter Ordnung.

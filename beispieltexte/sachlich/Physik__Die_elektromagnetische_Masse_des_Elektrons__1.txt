@@ -1,0 +1,15 @@
+(Göttingen), Die elektromagnetische Masse des Elektrons.
+
+Auf der vorjährigen Naturforscherversammlung in Hamburg konnte ich Ihnen über Versuche berichten, aus denen hervorging, dass das Verhältnis der Becquerelstrahlen mit zunehmender Geschwindigkeit abnähme, also wenn man als konstant betrachtet, zunähme und zwar um so rascher, je mehr sich die Geschwindigkeit der Lichtgeschwindigkeit nähert. Ein derartiges Verhalten ergibt sich theoretisch aus der Gleichung für die Energie einer schnell bewegten elektrischen Ladung. Es glückte damals auch, die Resultate mit einer von Herrn abgeleiteten theoretischen Formel in Einklang zu bringen; jedoch nur unter der Annahme, dass der grösste Teil der Masse des bewegten Elektrons mechanischen, der Rest elektromagnetischen Ursprungs sei. Bald nach Veröffentlichung der damaligen Versuche zeigte jedoch Herr , dass die sche Formel für die Feldenergie des bewegten Elektrons die elektromagnetische Masse nur im Falle einer Beschleunigung in Richtung der Bewegung ohne weiteres zu berechnen gestatte, dass dagegen bei transversaler Beschleunigung, wie sie bei meinen Versuchen vorlag, ein von der schen Formel abweichender Ausdruck für die Masse gilt. Ist , die Ladung des Elektrons in der Wert der elektromagnetischen Masse für kleine Geschwindigkeiten, so ist nach
+
+(für wird ; für wird .
+
+Eine bereits von Herrn versuchte Vergleichung meiner Versuchsresultate mit seiner Formel ergab keine gute Übereinstimmung, die Masse änderte sich schneller als die Theorie verlangte, sodass eine etwa hinzugefügte mechanische Masse hätte negativ angesetzt werden müssen.
+
+Im folgenden soll nun ein rationellerer Wert zur Auswertung der Resultate gezeigt und zugleich an der Hand neuen Versuchsmaterials
+
+Bei den damaligen Berechnungen wurden nämlich die absoluten Werte von und unter Benutzung der des elektrischen und magnetischen Feldes bestimmt, wobei schon damals die möglichen Fehler zu etwa 5 Proz. geschätzt wurden, Fehler, die viel grösser sind, als die relativen Fehler bei Ausmessung der Platten.
+
+Wegen der grossen Veränderlichkeit von für nahezu gleich 1 bedeutet aber ein kleiner Fehler von einen sehr grossen von (für resp. ist z. B. resp. , d. h. einem Fehler in der Bestimmung von von 2 Proz. entspricht ein Fehler von im Betrage von 19 Proz.).
+
+Zu einer rationellen Verwertung der auf der Platte ausgemessenen Kurve gelangt man also nur, indem man die Relativwerte miteinander vergleicht; man darf die Konstanten der Kurve nicht direkt durch Messung der Apparatdimensionen und des Feldes bestimmen, sondern muss nach der Methode der kleinsten Quadrate die wahrscheinlichsten Werte ermitteln.

@@ -1,0 +1,17 @@
+(Berlin), Die Kaufmannschen Messungen der Ablenkbarkeit der -Strahlen in ihrer Bedeutung für die Dynamik der Elektronen.
+
+Meine Herren! Wohl alle Physiker, welche sich spezieller für die Entwickelung des neuesten Zweiges der Elektrodynamik, der Mechanik der Elektronen, interessieren, haben mit großer Spannung dem Ergebnis der im vorigen Jahre von Herrn W. unternommenen subtilen Messungen der elektrisch-magnetischen Ablenkbarkeit der -Strahlen des Radiums entgegengesehen, und die an diese Versuche geknüpften Erwartungen sind auch in hohem Maße erfüllt worden; denn Herr hat aus ihnen eine große Menge wertvoller Daten gewonnen, und er hat außerdem, was besonders dankbar anerkannt werden muss, der Öffentlichkeit ein so reiches und zuverlässiges Zahlenmaterial zur Verfügung gestellt, dass ein jeder in die Lage versetzt ist, die von Herrn gezogenen Schlussfolgerungen selbständig nachzuprüfen und zu ergänzen.
+
+Von dieser Anregung habe ich um so lieber Gebrauch gemacht, als ja die Frage, welcher die Kaufmannschen Versuche gewidmet sind, für verschiedene elektrodynamische Theorien geradezu eine Lebensfrage ist. Von mehreren dieser Theorien liegen bekanntlich schon eine Anzahl ausgezeichneter mathematischer Untersuchungen vor, und deren physikalische Bedeutung würde natürlich mit einem Schlage aufgehoben, wenn die betreffende Theorie in dem entstandenen Wettstreit unterliegen müsste.
+
+Die Methode, nach welcher Herr den Inhalt der verschiedenen Theorien an seinen Messungen geprüft hat, darf ich hier als bekannt voraussetzen. Mir lag nun zunächst daran, zu sehen, wie weit die einzelnen gemessenen Ablenkungen von denjenigen entfernt liegen, welche aus den verschiedenen Theorien auf Grund der gemessenen „Apparatkonstanten“ von vornherein berechnet werden können. Da ich es vorzog, die gemessenen Ablenkungen (, ) nicht gleich von vornherein „auf unendlich kleine Ablenkungen (, ) zu reduzieren“, so mussten die Bewegungsgleichungen der Elektronen vollständig integriert werden. Dieselben lauten für alle verglichenen Theorien:
+
+Hierin bedeutet das kinetische Potential (die Lagrangesche Funktion) eines bewegten Elektrons, als Funktion der Geschwindigkeit
+
+und die elektrische und magnetische Feldstärke, beide in der -Richtung wirkend, als bekannte Funktionen von , das elektrische Elementarquantum, die Lichtgeschwindigkeit. Die elektrischen Größen sind im elektrostatischen Maß gemessen.
+
+Das Elektron bewegt sich von der Strahlungsquelle:
+
+bis zu dem Punkte der photographischen Platte:
+
+Um die Diaphragma-Öffnung gerade zu treffen, muss ein Elektron bei bestimmter Anfangsgeschwindigkeit in einer ganz bestimmten Richtung von der Strahlungsquelle ausgehen. Dadurch kommt auf der photographischen Platte () eine bestimmte Kurve (, ) zustande, deren Punkte von einem einzigen Parameter, etwa von der Anfangsgeschwindigkeit, abhängen.

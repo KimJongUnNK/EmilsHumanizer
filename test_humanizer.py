@@ -588,8 +588,16 @@ def test_app_waehlt_meine_texte_wenn_vorhanden(root, fake_ollama, monkeypatch, t
 
 # --- Ziel-Länge und automatisches Nachbessern ---
 UNIFORM = " ".join(f"Satz Nummer {i} hat genau sieben Wörter drin." for i in range(10))
-VARIED = ("Kurz. " + "Dieser Satz ist dagegen ziemlich lang, weil er mehrere Nebensätze hat, die erklären, warum "
-          "etwas passiert, obwohl es niemand erwartet hätte, sodass am Ende alle staunen. ") * 5
+VARIED = (
+    "Kurz. Dieser Satz ist dagegen ziemlich lang, und er hat mehrere Nebensätze, die erklären, warum etwas passiert, "
+    "obwohl es niemand erwartet hätte, sodass am Ende alle staunen. Na gut. Wer morgens um sechs am Bahnsteig steht "
+    "und auf einen Zug wartet, der schon zweimal ausgefallen ist, versteht ziemlich schnell, was Geduld bedeutet und "
+    "wie wenig sie nützt. Stimmt. Als die Halle endlich offen war, drängten sich die Leute an den Kassen, die Musik "
+    "lief schon, und draußen regnete es so stark, dass niemand mehr an die Zelte denken wollte. Egal. Dass die "
+    "Technik am Ende hielt, lag weniger am Glück als an den drei Leuten, die die ganze Nacht Kabel geprüft und "
+    "Scheinwerfer neu ausgerichtet hatten, ohne dass es jemand merkte. Fertig. Obwohl die Kasse am Abend nicht "
+    "stimmte, ging am nächsten Morgen alles wieder von vorn los, mit neuen Bändchen, neuen Listen und demselben Kaffee "
+    "aus der Thermoskanne vom Vortag. ")
 
 
 def test_quellenangaben_trennen_keinen_satz():
@@ -652,9 +660,9 @@ def test_humanize_checked_bessert_nach(scripted_ollama):
 def test_humanize_checked_behaelt_erste_wenn_zweite_schlechter(scripted_ollama):
     url, replies, _ = scripted_ollama
     first = VARIED[:len(VARIED) // 2]
-    replies += [first, "Kaputt."]
+    replies += [first, "Kaputt.", "Auch kaputt."]
     result, passes = h.humanize_checked(VARIED + " Am 24.07.2010.", "Akademisch", "m", url)
-    assert passes == 2 and result == first.strip()
+    assert passes == 3 and result == first.strip()
 
 
 def test_app_zeigt_nachgebessert(root, scripted_ollama, monkeypatch):
@@ -667,7 +675,7 @@ def test_app_zeigt_nachgebessert(root, scripted_ollama, monkeypatch):
     app.input.insert("1.0", VARIED)
     app.run()
     pump(root, lambda: "Fertig" in app.status["text"])
-    assert "(nachgebessert)" in app.status["text"]
+    assert "(1× nachgebessert)" in app.status["text"]
     assert app.update_button.master is app.go.master
 
 
@@ -701,3 +709,47 @@ def test_einstellungen_kaputt_oder_fremd(tmp_path, monkeypatch):
     assert h.load_settings() == {}
     (tmp_path / "einstellungen.json").write_text("[1, 2]", encoding="utf-8")
     assert h.load_settings() == {}
+
+
+def test_humanize_checked_hoert_nach_zwei_korrekturen_auf(scripted_ollama):
+    url, replies, seen = scripted_ollama
+    replies += [UNIFORM[:150]] * 3
+    _, passes = h.humanize_checked(VARIED, "Akademisch", "m", url)
+    assert passes == 3 and len(seen) == 3
+    assert seen[2]["messages"][2]["content"] == UNIFORM[:150].strip()
+
+
+SOURCE = """Am 24.07.2010 kamen viele Besucher nach Duisburg. Die Planung der Fluchtwege war mangelhaft.
+
+Beim Schallschutz gilt ein Richtwert von 100 dB(A) am Mischpult. Anrainer müssen geschützt werden.
+
+Abschließend zeigt sich: Nachhaltigkeit und Sicherheit bilden gemeinsam das Fundament jeder Veranstaltung."""
+
+
+def test_added_facts():
+    assert h.added_facts(SOURCE, SOURCE) == []
+    assert h.added_facts(SOURCE, SOURCE + " Dabei starben 21 Menschen, 21 zu viel.") == ["21"]
+
+
+def test_dropped_paragraphs():
+    assert h.dropped_paragraphs(SOURCE, SOURCE) == []
+    without_end = "\n\n".join(h.paragraphs(SOURCE)[:2])
+    assert h.dropped_paragraphs(SOURCE, without_end) == ["Abschließend zeigt sich: Nachhaltigkeit und …"]
+    assert h.dropped_paragraphs("Nur ein Absatz mit Wörtern.", "") == []
+
+
+def test_crutches():
+    text = " ".join(f"Das gilt, weil es so ist. Zudem stimmt das {i}." for i in range(4))
+    found = h.crutches(text)
+    assert any("4-mal" in f for f in found) and any("4 Sätze mit Zudem begonnen" in f for f in found)
+    assert h.crutches(VARIED) == []
+
+
+def test_problems_und_warnung_bei_erfundenem_und_fehlendem():
+    result = h.paragraphs(SOURCE)[0] + " Dabei starben 21 Menschen.\n\n" + h.paragraphs(SOURCE)[1]
+    found = h.problems(SOURCE, result)
+    assert any("21" in f and "müssen raus" in f for f in found)
+    assert any("Abschließend" in f for f in found)
+    warning = h.warnings(SOURCE, result)
+    assert "neu, steht nicht im Original: 21" in warning and 'Absatz fehlt: "Abschließend' in warning
+    assert h.badness(SOURCE, result) > h.badness(SOURCE, SOURCE)

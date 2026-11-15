@@ -43,7 +43,18 @@ Oben in der App unter **Stilvorlage**:
 - **Meine Texte:** Eigene Texte. **Meine Texte …** öffnet den Ordner (`%APPDATA%\EmilsHumanizer\texte`), dort `.txt`-Dateien ablegen. Am besten wirken eigene frühere Arbeiten. Der Ordner liegt nur auf deinem Rechner und kommt nie ins Repo.
 - **Aus:** ohne Vorlage.
 
-Nach dem Umschreiben warnt die App rot, wenn Zahlen oder Daten aus dem Original fehlen oder die Ausgabe um mehr als 20 % kürzer ist.
+## Prüfen und Nachbessern
+
+Das Modell bekommt eine Ziel-Wortzahl (90 bis 115 % des Originals). Danach prüft die App die Fassung:
+
+- fehlen Zahlen oder Daten aus dem Original, oder sind welche dazugekommen, die das Modell erfunden hat?
+- fehlt ein ganzer Absatz, etwa der Schluss?
+- ist sie mehr als 15 % kürzer?
+- sind die Sätze fast alle gleich lang, stehen noch KI-Floskeln drin, hängt sie ständig ", weil …" an?
+
+Findet sie etwas, schickt sie dem Modell eine konkrete Rückmeldung und lässt es nachbessern, höchstens zweimal. Behalten wird die beste Fassung, die Statuszeile zeigt, wie oft nachgebessert wurde. Was danach noch fehlt oder erfunden ist, steht rot unter den Textfeldern.
+
+Erfundene Aussagen ohne Zahl (etwa ein dazugedichteter Grund) erkennt die Prüfung nicht. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
 
 Die mitgelieferten Texte stammen von [Wikisource](https://de.wikisource.org), wo nur gemeinfreie Texte stehen (Urheberrecht abgelaufen). Darunter Kurt Tucholsky, Franz Kafka, Ludwig Thoma und viele Artikel aus Zeitschriften wie der "Gartenlaube". Gedichte und Dramen sind aussortiert, Stellen mit rassistischen oder antisemitischen Begriffen entfernt, die Rechtschreibung ist an die heutige angepasst (daß → dass). Das Skript dafür liegt unter `werkzeuge/`.
 

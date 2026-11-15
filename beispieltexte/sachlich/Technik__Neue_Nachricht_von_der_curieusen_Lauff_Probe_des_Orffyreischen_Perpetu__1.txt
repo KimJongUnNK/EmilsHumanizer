@@ -1,8 +1,4 @@
-Als Grundlage dienen die Wikisource:Editionsrichtlinien
-Die Wiedergabe folgt in der Schreibweise der Vorlage. 
-Überschriebenes „e“ über den Vokalen „a“, „o“ und „u“ wird als moderner Umlaut transkribiert.
-„i“ und „j“ werden nach ihrem Lautwert wiedergegeben.
-Ligaturen, wie z.B. Æ und Œ, werden zu zwei getrennten Zeichen transkribiert, im Beispiel also zu Ae und Oe.
+Als Grundlage dienen die Wikisource:Editionsrichtlinien Die Wiedergabe folgt in der Schreibweise der Vorlage. Überschriebenes „e“ über den Vokalen „a“, „o“ und „u“ wird als moderner Umlaut transkribiert. „i“ und „j“ werden nach ihrem Lautwert wiedergegeben. Ligaturen, wie z.B. Æ und Œ, werden zu zwei getrennten Zeichen transkribiert, im Beispiel also zu Ae und Oe.
 
 auf dem Schlosse Weißenstein bei Cassel,
 

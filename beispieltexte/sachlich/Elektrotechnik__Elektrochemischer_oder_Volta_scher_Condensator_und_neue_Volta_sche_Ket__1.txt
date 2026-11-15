@@ -1,0 +1,15 @@
+VIII. Elektrochemischer oder Volta’scher Condensator, und neue Volta’sche Kette.
+
+Unter ersteren — nicht eben glücklich gewählten — Namen beschreibt Hr. De la Rive eine Vorrichtung, in welcher der Strom einer einfachen Kette durch den von ihr selbst erregten Induktionsstrom so verstärkt wird, dass er im Stande ist, Wasser zwischen Platinplatten in beträchtlicher Menge zu zersetzen. Man sieht diese Vorrichtung in Fig. 1 Taf. II abgebildet.
+
+ist eine einfache Kette, entweder eine Daniell’sche, die für sich das Wasser zwischen Platten gar nicht zu zersetzen vermag, oder eine Grove’sche, die es unter gleichen Umständen nur in sehr unbedeutendem Maasse zersetzt. Die an ihre Platten gelötheten Drähte endigen in den Quecksilbernäpfchen und .
+
+ist ein Schälchen von amalgirtem Kupfer. ein Metallstab, verseben bei mit einer Feder, die sein herabgebogenes Ende mit dem Boden des Schälchens in Berührung hält; ein Leiter, welcher den Stab mit dem Draht in Verbindung setzt.
+
+Dieser Draht , ein mit Seide besponnener Kupferdraht, ist um eine Hülse gewickelt. Er muss dick sein und darf keine zu große Länge haben. Hr. De la Rive nimmt statt eines Drahtes lieber drei neben einander, jeden von 1 Millimeter, die er 100 Umgänge um die Hülse machen lässt, und dann an ihren Enden in und vereinigt.
+
+ist ein Cylinder von weichem Eisen im Innern der Hülse; ein Stückchen weiches Eisen, das an dem Stab befestigt ist und vom Ende des Eisencylinders heraufgezogen wird, sobald dieser durch den Strom magnetisirt ist.
+
+und sind die Enden zweier Leiter, die dazu dienen, das mit Platinplatten versehene Voltameter in den Kreis der Kette zu bringen.
+
+So wie man die Kette schließt, kreißt der Strom in , augenblicklich wird das Stückchen heraufgezogen, weil magnetisirt ist. Allein dadurch wird auch sogleich die Schliessung bei unterbrochen, weil der Stab , dessen herabgebogenes Ende auf den Boden des Schälchens drückte, sich hebt. Diese Unterbrechung ruft in dem auf gewickelten Draht einen Induktionsstrom hervor, welcher gleiche Richtung mit dem der Kette besitzt. Andererseits ist, so lange der Stab gehoben bleibt, ein neuer Schließbogen gebildet, von der Kette aus längs zum Voltameter und von da längs zur Kette zurück. Das Voltameter

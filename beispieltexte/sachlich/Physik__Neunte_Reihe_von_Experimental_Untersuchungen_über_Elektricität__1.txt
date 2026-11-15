@@ -1,0 +1,17 @@
+II. Neunte Reihe von Experimental-Untersuchungen über Elektricität: von Hrn. M. Faraday.
+
+(Übersandt vom Hrn. Verfasser in einem besonderen Abzug aus den Philosoph. Transact. f. 1835, pt. II.)
+
+§. 15. Über den Verteilungseinfluss eines elektrischen Stroms auf sich selbst und den elektrischer Ströme überhaupt.
+
+) Die nachstehenden Untersuchungen betreffen eine sehr merkwürdige Verteilungswirkung elektrischer Ströme oder verschiedener Teile eines und desselben Stroms, und deuten auf einen innigen Zusammenhang dieser Wirkung mit dem Durchgang der Elektricität durch leitende Körper, selbst mit dem Überspringen von Funken.
+
+) Die Untersuchung ging hervor aus einer mir von Hrn. Jenkin mitgeteilten Thatsache, die folgende ist. Gebraucht man einen kurzen Draht zur Verknüpfung der beiden Platten einer einfachen voltaschen Kette, so erhält man, wie man auch verfahren mag, aus diesem Draht keinen elektrischen Schlag; wendet man aber den um einen Elektromagneten geschlungenen Draht an, so fühlt man bei jedesmaliger Öffnung der Kette einen Schlag, sobald man dabei die Enden des Drahts mit beiden Händen anfasst.
+
+) Zugleich beobachtet man auch, was den Physikern längst bekannt ist, an der Trennungsstelle einen hellen Funken.
+
+) Einen kurzen Abriss von diesen Resultaten, nebst einigen dazu gehörigen, bei Anwendung langer Drähte beobachteten Erscheinungen habe ich in den Philosophical Magazine für 1834 bekannt gemacht, mit Hinzufügung einiger Betrachtungen über deren Ursprung. Fernere Untersuchungen haben mich die Unrichtigkeit meiner ersten Ansichten einsehen lassen, und mich zuletzt dahin geführt, diese Erscheinungen für identisch zu halten mit den Induktionsphänomenen, welche ich so glücklich war, in der ersten Reihe dieser Experimental-Untersuchungen zu entwickeln. Ungeachtet dieser Identität glaube ich jedoch, dass die Erscheinungen durch die Allgemeinheit und Eigentümlichkeit der Ansichten, zu welchen sie in Betreff der elektrischen Ströme führen, der Beachtung der K. Gesellschaft nicht unwürdig sein werden.
+
+) Der Elektromotor bestand aus einem (hohlen) Zinkcylinder, der zwischen die beiden Teile eines doppelten Kupfercylinders gesteckt war, und wie gewöhnlich durch Korkstücke an unmittelbarer Berührung desselben gehindert wurde; der Zinkcylinder war acht Zoll hoch und vier Zoll im Durchmesser. Er sowohl wie der Kupfercylinder war mit einem dicken Draht versehen, der ein Näpfchen mit Quecksilber trug, und in diesem Napfchen wurde die Schließung oder Öffnung der Kette durch gerade oder schraubenförmige Drähte oder Elektromagnete vollzogen. Diese Näpfchen sollen im Laufe dieses Aufsatzes immer und heißen ().
+
+) Es wurden einige Schrauben angefertigt,

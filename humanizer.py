@@ -32,12 +32,16 @@ EXAMPLE_BUDGET = 1200
 EXAMPLE_COUNT = 3
 
 SYSTEM = """Du schreibst deutsche Texte so um, dass sie klingen, als hätte sie ein Mensch geschrieben. Regeln:
-- Die Ausgabe ist immer Deutsch. Inhalt, Fakten, Zahlen und Zitate bleiben exakt erhalten. Erfinde nichts dazu.
+- Die Ausgabe ist immer Deutsch. Inhalt, Fakten, Zahlen und Zitate bleiben exakt erhalten. Erfinde nichts dazu:
+  keine neuen Fakten, Zahlen, Beispiele, Ursachen oder Folgen, die nicht in der Vorlage stehen. Das gilt besonders
+  neben Quellenangaben, denn was bei "(vgl. …)" steht, muss genau so aus der Vorlage stammen.
+- Jeder Absatz der Vorlage kommt mit seiner Aussage auch in der Ausgabe vor, auch der Schluss.
 - Jede Zahl und jedes Datum aus der Vorlage steht auch in der Ausgabe, in derselben Schreibweise.
 - Die Länge bleibt ungefähr gleich, höchstens 15 % kürzer oder länger. Lass keine Aussage weg.
   Wenn du eine Floskel streichst, sag dasselbe konkreter, statt es ersatzlos wegzulassen.
 - Quellenangaben wie "(vgl. Berger 2021, S. 45)" bleiben Zeichen für Zeichen erhalten.
 - Übernimm die Schreibweise der Vorlage (ß oder ss, österreichische und Schweizer Wörter bleiben, wie sie sind).
+- Häng Begründungen nicht ständig mit ", weil …" an und beginne Sätze nicht ständig mit "Zudem" oder "Denn".
 - Mische die Satzlängen stark. Mindestens jeder vierte Satz hat 25 Wörter oder mehr, mit Nebensätzen und
   Begründungen ("weil", "obwohl", "sodass"). Mindestens jeder fünfte hat höchstens 7 Wörter.
   Nie mehr als drei Sätze hintereinander mit ähnlicher Länge.
@@ -478,54 +482,83 @@ def humanize(text: str, style: str, model: str, url: str = OLLAMA_URL, examples:
 
 
 def badness(source: str, result: str) -> int:
-    """Wie weit eine Fassung danebenliegt: fehlende Fakten wiegen am schwersten, dann Kürzung, dann Gleichförmigkeit."""
+    """Wie weit eine Fassung danebenliegt. Erfundenes und Fehlendes wiegt am schwersten, Stil am wenigsten."""
     lengths = [len(s.split()) for s in sentences(result)]
     uniform = len(lengths) >= 6 and burstiness(result) < 0.45
-    return 25 * len(missing_facts(source, result)) + max(0, shrinkage(source, result) - 15) + 20 * uniform \
-        + 5 * tell_count(result)
+    return 25 * len(missing_facts(source, result)) + 25 * len(added_facts(source, result)) \
+        + 30 * len(dropped_paragraphs(source, result)) + max(0, shrinkage(source, result) - 15) + 20 * uniform \
+        + 5 * tell_count(result) + 5 * len(crutches(result))
+
+
+def crutches(result: str) -> list[str]:
+    """Satzmuster, die sich mechanisch wiederholen und dadurch nach Maschine klingen."""
+    limit = max(2, len(sentences(result)) // 8)
+    found = []
+    weil = len(re.findall(r",\s+weil\b", result))
+    if weil > limit:
+        found.append(f'{weil}-mal ", weil …" angehängt')
+    starts = re.findall(r"(?:^|[.!?]\s+)(Zudem|Denn|Außerdem|Gleichzeitig|Dabei|Somit|Daher)\b", result)
+    if len(starts) > limit:
+        found.append(f"{len(starts)} Sätze mit " + "/".join(sorted(set(starts))) + " begonnen")
+    return found
 
 
 def problems(source: str, result: str) -> list[str]:
-    """Was an einer Fassung noch nicht stimmt, als Anweisung für einen zweiten Durchgang. Leer heißt: passt."""
+    """Was an einer Fassung noch nicht stimmt, als Anweisung für einen weiteren Durchgang. Leer heißt: passt."""
     found = []
+    added = added_facts(source, result)
+    if added:
+        found.append("Diese Angaben stehen nicht in der Vorlage und müssen raus: " + ", ".join(added) +
+                     ". Streich auch die Sätze, die nur ihretwegen da sind.")
+    gone = missing_facts(source, result)
+    if gone:
+        found.append("Diese Angaben aus der Vorlage fehlen und müssen genau so wieder rein: " + ", ".join(gone) + ".")
+    for start in dropped_paragraphs(source, result):
+        found.append(f'Der Absatz, der mit "{start}" beginnt, fehlt inhaltlich. Seine Aussage muss rein.')
     shorter = shrinkage(source, result)
     if shorter > 15:
         low, high = length_target(source)
         found.append(f"Deine Fassung hat nur {len(result.split())} Wörter, die Vorlage {len(source.split())}. "
-                     f"Schreib {low} bis {high} Wörter. Erfinde nichts dazu, sondern sag die Gedanken der Vorlage "
-                     "ausführlicher: mit Begründungen, Folgen und Verbindungen zwischen den Aussagen.")
-    gone = missing_facts(source, result)
-    if gone:
-        found.append("Diese Angaben aus der Vorlage fehlen und müssen genau so wieder rein: " + ", ".join(gone) + ".")
+                     f"Schreib {low} bis {high} Wörter. Füge dafür nichts hinzu, was nicht in der Vorlage steht, "
+                     "keine neuen Fakten, Beispiele, Ursachen oder Folgen. Werde länger, indem du die Aussagen der "
+                     "Vorlage vollständiger ausformulierst und miteinander verbindest.")
     lengths = [len(s.split()) for s in sentences(result)]
     if len(lengths) >= 6 and (burstiness(result) < 0.45 or sum(n >= 25 for n in lengths) < len(lengths) / 6):
-        found.append(f"Deine Sätze sind fast alle gleich lang ({min(lengths)} bis {max(lengths)} Wörter, die meisten "
-                     "um die zehn). Baue lange Sätze mit Nebensätzen ein, mindestens jeder vierte mit 25 Wörtern "
-                     "oder mehr, und setze einzelne sehr kurze dazwischen.")
-    if tell_count(result):
-        left = [t for t in AI_TELLS if t in result.lower()]
-        if left:
-            found.append("Diese Floskeln stehen noch drin: " + ", ".join(left) + ". Formuliere sie konkret.")
+        typical = sorted(lengths)[len(lengths) // 2]
+        found.append(f"Deine Sätze sind zu gleich lang ({min(lengths)} bis {max(lengths)} Wörter, die meisten um "
+                     f"die {typical}). Mindestens jeder vierte Satz braucht 25 Wörter oder mehr, und dazwischen "
+                     "gehören einzelne sehr kurze mit höchstens 7 Wörtern.")
+    left = [t for t in AI_TELLS if t in result.lower()]
+    if left:
+        found.append("Diese Floskeln stehen noch drin: " + ", ".join(left) + ". Formuliere sie konkret.")
+    for crutch in crutches(result):
+        found.append(f"Du hast {crutch}. Das wirkt mechanisch, bau diese Sätze anders.")
     return found
 
 
 def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL,
-                     examples: list[str] | None = None) -> tuple[str, int]:
-    """Schreibt um und bessert einmal nach, wenn die Fassung zu kurz, zu gleichförmig oder unvollständig ist.
+                     examples: list[str] | None = None, corrections: int = 2) -> tuple[str, int]:
+    """Schreibt um und bessert bis zu corrections-mal nach, solange problems() etwas findet.
 
-    Liefert die bessere der beiden Fassungen und wie viele Durchgänge es gebraucht hat.
+    Jede Nachbesserung baut auf der letzten Fassung auf. Zurück kommt die beste aller Fassungen nach badness()
+    und wie viele Durchgänge es insgesamt waren.
     """
     messages = [{"role": "system", "content": system_prompt(style, examples or [])},
                 {"role": "user", "content": rewrite_request(text)}]
-    first = _chat(model, url, messages)
-    issues = problems(text, first)
-    if not issues:
-        return first, 1
-    second = _chat(model, url, messages + [
-        {"role": "assistant", "content": first},
-        {"role": "user", "content": "Das passt noch nicht:\n- " + "\n- ".join(issues) +
-         "\n\nGib nur die verbesserte Fassung aus."}])
-    return (second if badness(text, second) <= badness(text, first) else first), 2
+    current = _chat(model, url, messages)
+    best, best_score, passes = current, badness(text, current), 1
+    for _ in range(corrections):
+        issues = problems(text, current)
+        if not issues:
+            break
+        current = _chat(model, url, messages + [
+            {"role": "assistant", "content": current},
+            {"role": "user", "content": "Das passt noch nicht:\n- " + "\n- ".join(issues) +
+             "\n\nGib nur die verbesserte Fassung aus."}])
+        passes += 1
+        if badness(text, current) <= best_score:
+            best, best_score = current, badness(text, current)
+    return best, passes
 
 
 FACT = re.compile(r"\d+(?:[.,:/-]\d+)*")
@@ -541,6 +574,40 @@ def missing_facts(source: str, result: str) -> list[str]:
     return missing
 
 
+def added_facts(source: str, result: str) -> list[str]:
+    """Zahlen und Daten in der Ausgabe, die das Original nicht enthält, also vom Modell erfunden sind."""
+    have = set(FACT.findall(source))
+    added = []
+    for fact in FACT.findall(result):
+        if fact not in have and fact not in added:
+            added.append(fact)
+    return added
+
+
+def paragraphs(text: str) -> list[str]:
+    return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+
+
+def dropped_paragraphs(source: str, result: str) -> list[str]:
+    """Absätze des Originals, deren eigene Begriffe in der Ausgabe fast alle fehlen. Liefert ihre Anfänge.
+
+    Gezählt werden nur großgeschriebene Wörter, die in keinem anderen Absatz vorkommen, verglichen über die ersten
+    sechs Buchstaben, damit "Veranstalter" und "Veranstaltungen" nicht als verschieden zählen.
+    """
+    paras = paragraphs(source)
+    if len(paras) < 2:
+        return []
+    stem = lambda w: w.lower()[:6]
+    nouns = [{stem(w) for w in re.findall(r"\b[A-ZÄÖÜ][a-zäöüß]{4,}", p)} for p in paras]
+    kept = {stem(w) for w in re.findall(r"\w{5,}", result)}
+    dropped = []
+    for i, p in enumerate(paras):
+        own = nouns[i] - set().union(*(n for j, n in enumerate(nouns) if j != i))
+        if len(own) >= 3 and len(own & kept) / len(own) < 0.34:
+            dropped.append(" ".join(p.split()[:5]) + " …")
+    return dropped
+
+
 def shrinkage(source: str, result: str) -> int:
     """Um wie viel Prozent die Ausgabe kürzer ist als das Original. Negativ heißt länger."""
     before = len(source.split())
@@ -552,6 +619,11 @@ def warnings(source: str, result: str) -> str:
     gone = missing_facts(source, result)
     if gone:
         parts.append("fehlt in der Ausgabe: " + ", ".join(gone))
+    added = added_facts(source, result)
+    if added:
+        parts.append("neu, steht nicht im Original: " + ", ".join(added))
+    for start in dropped_paragraphs(source, result):
+        parts.append(f'Absatz fehlt: "{start}"')
     shorter = shrinkage(source, result)
     if shorter > 20:
         parts.append(f"Ausgabe ist {shorter} % kürzer als das Original")
@@ -1001,7 +1073,7 @@ class App:
             for start, end in gone:
                 self.input.tag_add("weg", f"1.0+{lead + start}c", f"1.0+{lead + end}c")
         self.status.config(fg=MUTED, text=(
-            f"Fertig in {seconds:.0f} s{' (nachgebessert)' if passes > 1 else ''}  ·  "
+            f"Fertig in {seconds:.0f} s{f' ({passes - 1}× nachgebessert)' if passes > 1 else ''}  ·  "
             f"{changed_share(result, added)} % neu formuliert  ·  "
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
             f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))

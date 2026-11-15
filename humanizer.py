@@ -677,7 +677,7 @@ def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str
     off = max(0.0, abs(words - target) / max(target, 1) - 0.2) * 100
     return (25 * (len(missing_facts(source, result)) + len(added_facts(source, result))
                   + len(missing_citations(source, result)) + len(doubled_citations(source, result)))
-            + off + 15 * min(plan_fit(plan, result), 1.0) + 8 * len(unchanged_sentences(source, result))
+            + off + 15 * min(plan_fit(plan, result), 1.0) + 18 * len(unchanged_sentences(source, result))
             + 5 * tell_count(result) + 5 * len(crutches(result)) + 5 * repeated + fidelity)
 
 

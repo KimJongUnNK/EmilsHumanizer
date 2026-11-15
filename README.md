@@ -33,6 +33,20 @@ Die App garantiert nicht, dass ein Text an KI-Detektoren vorbeikommt. Lokale Mod
 
 Sehr lange Texte (grob über 2.000 Wörter) in Teilen umschreiben, sonst schneidet Ollama den Anfang stillschweigend ab.
 
+## Stilvorlage: echte Menschentexte
+
+Vor jedem Umschreiben bekommt das Modell drei kurze Auszüge aus Texten, die nachweislich Menschen geschrieben haben. Daran sieht es, wie menschliches Deutsch klingt: wechselnde Satzlängen, Sprünge, Ton. Inhalte übernimmt es daraus nicht. Das Modell wird dabei nicht trainiert, die Auszüge wechseln bei jedem Durchlauf.
+
+Oben in der App unter **Stilvorlage**:
+
+- **Mitgeliefert:** Texte, die mit der App kommen, passend zum Stil ausgewählt. "Akademisch" nimmt sachliche Texte (Technik, Physik, Architektur, Geschichte, Musik, Essays, Fachaufsätze), "Locker" nimmt Feuilletons und Glossen, "Natürlich" vor allem Reiseberichte und Reportagen.
+- **Meine Texte:** Eigene Texte. **Meine Texte …** öffnet den Ordner (`%APPDATA%\EmilsHumanizer\texte`), dort `.txt`-Dateien ablegen. Am besten wirken eigene frühere Arbeiten. Der Ordner liegt nur auf deinem Rechner und kommt nie ins Repo.
+- **Aus:** ohne Vorlage.
+
+Nach dem Umschreiben warnt die App rot, wenn Zahlen oder Daten aus dem Original fehlen oder die Ausgabe um mehr als 20 % kürzer ist.
+
+Die mitgelieferten Texte stammen von [Wikisource](https://de.wikisource.org), wo nur gemeinfreie Texte stehen (Urheberrecht abgelaufen). Darunter Kurt Tucholsky, Franz Kafka, Ludwig Thoma und viele Artikel aus Zeitschriften wie der "Gartenlaube". Gedichte und Dramen sind aussortiert, Stellen mit rassistischen oder antisemitischen Begriffen entfernt, die Rechtschreibung ist an die heutige angepasst (daß → dass). Das Skript dafür liegt unter `werkzeuge/`.
+
 ## Update
 
 Der Knopf **Update** oben rechts prüft, ob es eine neuere Version gibt. Wenn ja, lädt die App sie nach einer Rückfrage herunter, ersetzt sich selbst und startet neu. Die App prüft nur auf Klick, nie von allein. Wer aus dem Quelltext startet, lädt die neue Version selbst von dieser Seite.

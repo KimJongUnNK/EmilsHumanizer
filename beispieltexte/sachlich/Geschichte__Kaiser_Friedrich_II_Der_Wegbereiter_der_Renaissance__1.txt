@@ -1,0 +1,11 @@
+Als Grundlage dienen die Wikisource:Editionsrichtlinien
+Worttrennungen am Zeilenende entfallen
+Absätze werden durch Hinzufügen einer Leerzeile erzeugt
+G e s p e r r t gedruckte Wörter im Haupttext werden kursiv wiedergegeben, an anderen Stellen des Buches bleibt diese Schriftauszeichnung bestehen
+Wörter in Antiqua-Schrift werden in Nicht-Proportionalschrift wiedergegeben
+Sonderzeichen und nicht-lateinische Schriftzeichen werden möglichst originalgetreu wiedergegeben
+Das lange s (s) wird als normales s wiedergegeben.
+Der Originaltext wird kapitelweise aufgeteilt, Seitenzählungen werden angegeben
+Abbildungen:
+Die reprographischen Einzelabbildungen werden entsprechend der Vorlage als thumbnail inkl. der Bilderläuterungen in den Text eingefügt, möglichst zu Beginn oder am Ende eines Absatzes, um die Absatzlogik der Vorlage nicht zu zerstören; Abbildungen, die sich in der Vorlage über die gesamte Breite einer Seite erstrecken, werden mit einer Breite von 500px zentriert eingefügt 
+Auf die Wiedergabe der Photographien wird aus urheberrechtlichen Gründen vorerst verzichtet. Damit die jeweiligen gemeinfreien Bilderläuterungen nicht verlorengehen, wird statt des Bildes ein Platzhalter eingefügt (:Datei:no image.svg, Breite 180px). Für die Identifizierung der Photographien siehe die Diskussionsseite.

@@ -1,0 +1,9 @@
+Als Grundlage dienen die Wikisource:Editionsrichtlinien.
+Die Transkription folgt dem Original.
+Der Seitenwechsel erfolgt bei Worttrennung nach dem gesamten Wort. 
+Textauszeichnungen wie Antiqua werden übertragen. Gesperrter Text wird kursiv gesetzt.
+Längere Passagen in Antiqua (> eine Seite) werden der besseren Lesbarkeit halber nicht in Antiqua gesetzt. Sind innerhalb dieser Antiqua-Passagen kurze Textelemente nicht in Antiqua gesetzt, werden zur Hervorhebung diese dafür in Antiqua gesetzt.
+----
+Alle redaktionellen Texte dieses Projektes stehen unter der Lizenz CC-BY-SA 2.0 Deutschland
+
+In diesem Werk sind ursprünglich drei Bildtafeln enthalten (Nr. 1: „Eine Situations-Zeichnung der altgermanischen Denkmäler im Gerichte Delm“, Nr. 2: „Das Bild des Verdenschen Bischofs Iso“ und Nr. 3: „Das Bild des Pastor Brandts zu Cappe“). Von diesen ist nur die Bildtafel Nr. 2, die Abbildung der Grabplatte Iso von Wölpes, vollständig gescannt worden. Die Bildtafel Nr. 1 wurde beim Scannen nicht ausgeklappt und ist deshalb nur teilweise gescannt. Die Bildtafel Nr. 3 fehlt vollständig.

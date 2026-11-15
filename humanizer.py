@@ -5,6 +5,7 @@ import difflib
 import json
 import os
 import queue
+import random
 import re
 import subprocess
 import sys
@@ -24,10 +25,16 @@ BUILD = "dev"
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 PREFERRED_MODEL = "gemma3:12b"
 # Ollamas Standard-Kontext ist klein und schneidet lange Texte stillschweigend ab.
-OLLAMA_CONTEXT = 8192
+# Platz für Text, Ausgabe und Stilvorlage zusammen.
+OLLAMA_CONTEXT = 16384
+# Wie viele Wörter Stilvorlage höchstens vor jeden Text kommen.
+EXAMPLE_BUDGET = 1200
+EXAMPLE_COUNT = 3
 
 SYSTEM = """Du schreibst deutsche Texte so um, dass sie klingen, als hätte sie ein Mensch geschrieben. Regeln:
 - Die Ausgabe ist immer Deutsch. Inhalt, Fakten, Zahlen und Zitate bleiben exakt erhalten. Erfinde nichts dazu.
+- Jede Zahl und jedes Datum aus der Vorlage steht auch in der Ausgabe, in derselben Schreibweise.
+- Die Länge bleibt ungefähr gleich, höchstens 15 % kürzer oder länger. Lass keine Aussage weg.
 - Übernimm die Schreibweise der Vorlage (ß oder ss, österreichische und Schweizer Wörter bleiben, wie sie sind).
 - Mische die Satzlängen stark: Sätze mit drei Wörtern neben langen, verschachtelten.
 - Absätze sind ungleich lang.
@@ -40,6 +47,22 @@ SYSTEM = """Du schreibst deutsche Texte so um, dass sie klingen, als hätte sie 
 - Nimm konkrete Wörter statt abstrakter. Sätze dürfen mit "Und" oder "Aber" anfangen.
 - Wo das Register es erlaubt: Modalpartikeln (halt, eben, ja, schon, eigentlich), sparsam.
 - Gib nur den umgeschriebenen Text aus, sonst nichts."""
+
+EXAMPLES_INTRO = """
+Die folgenden Auszüge haben echte Menschen geschrieben. Sie zeigen, wie menschliches Deutsch klingt:
+wie die Satzlängen wechseln, wo ein Satz abbricht, wann ein Gedanke springt, wie der Ton schwankt.
+Übernimm Rhythmus und Ton. Übernimm NIE Inhalte, Themen, Namen, Bilder oder Formulierungen daraus.
+Manche Beispiele sind über hundert Jahre alt: Nimm daraus nur den Satzbau, keine veralteten Wörter,
+keine alte Rechtschreibung. Der Inhalt kommt nur aus dem Text, den du umschreibst."""
+
+# Welche mitgelieferten Textsorten zu welchem Stil passen, die erste zählt am meisten.
+STYLE_GROUPS = {
+    "Natürlich": ["bericht", "locker", "sachlich"],
+    "Akademisch": ["sachlich", "bericht"],
+    "Locker": ["locker", "bericht"],
+}
+
+STYLE_SOURCES = ["Mitgeliefert", "Meine Texte", "Aus"]
 
 STYLES = {
     "Natürlich": "Neutrales, natürliches Register.",
@@ -311,15 +334,143 @@ def verdict(need_vram: float, need_ram: float, ram: float | None, vram: float | 
     return "läuft, aber langsamer" if round(ram) >= need_ram else "zu groß für diesen Rechner"
 
 
-def humanize(text: str, style: str, model: str, url: str = OLLAMA_URL) -> str:
+def bundled_dir() -> str:
+    """Die mitgelieferten Beispieltexte, im Quelltext neben dieser Datei, in der .exe im Entpack-Ordner."""
+    return os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "beispieltexte")
+
+
+def user_dir() -> str:
+    """Ordner für eigene Texte. Liegt nur auf diesem Rechner."""
+    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "EmilsHumanizer", "texte")
+
+
+def load_texts(folder: str) -> list[str]:
+    """Alle .txt-Dateien eines Ordners, alphabetisch. Fehlt der Ordner, ist die Liste leer."""
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.lower().endswith(".txt"))
+    except OSError:
+        return []
+    texts = []
+    for name in names:
+        try:
+            raw = open(os.path.join(folder, name), "rb").read()
+        except OSError:
+            continue
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:  # ältere Windows-Editoren speichern so
+            text = raw.decode("cp1252", errors="replace")
+        if text.strip():
+            texts.append(text.strip())
+    return texts
+
+
+def excerpt(text: str, words: int) -> str:
+    """Anfang eines Texts mit höchstens so vielen Wörtern, nach Möglichkeit an einem Satzende abgeschnitten."""
+    if len(text.split()) <= words:
+        return text
+    cut = " ".join(text.split(" ")[:words])
+    while len(cut.split()) > words:
+        cut = cut.rsplit(" ", 1)[0]
+    end = max(cut.rfind(c) for c in ".!?…")
+    return cut[:end + 1] if end > len(cut) // 2 else cut + " …"
+
+
+def pick_examples(pools: list[list[str]], budget: int = EXAMPLE_BUDGET, count: int = EXAMPLE_COUNT,
+                  rng: random.Random | None = None) -> list[str]:
+    """Wählt zufällig bis zu count Texte, die meisten aus dem ersten Pool, je einen aus den weiteren.
+
+    Die Auszüge werden so gekürzt, dass sie zusammen höchstens budget Wörter haben.
+    """
+    rng = rng or random
+    pools = [p for p in pools if p]
+    if not pools or budget <= 0:
+        return []
+    extra = [rng.choice(p) for p in pools[1:count]]
+    main = pools[0]
+    chosen = rng.sample(main, min(count - len(extra), len(main))) + extra
+    share = budget // len(chosen)
+    return [excerpt(t, share) for t in chosen]
+
+
+_bundled: dict[str, list[str]] = {}
+
+
+def bundled_texts(group: str) -> list[str]:
+    """Mitgelieferte Texte einer Textsorte. Sie ändern sich nicht, also nur einmal laden."""
+    if group not in _bundled:
+        _bundled[group] = load_texts(os.path.join(bundled_dir(), group))
+    return _bundled[group]
+
+
+def style_examples(source: str, style: str, own: list[str], bundled=bundled_texts) -> tuple[list[str], str]:
+    """Liefert die Auszüge für die gewählte Stilvorlage und einen Hinweis, falls auf etwas anderes ausgewichen wurde."""
+    if source == "Aus":
+        return [], ""
+    if source == "Meine Texte" and own:
+        return pick_examples([own]), ""
+    pools = [bundled(g) for g in STYLE_GROUPS[style]]
+    note = "Im Ordner \"Meine Texte\" liegt noch nichts, ich habe die mitgelieferten Texte genommen." \
+        if source == "Meine Texte" else ""
+    return pick_examples(pools), note
+
+
+def system_prompt(style: str, examples: list[str]) -> str:
+    prompt = SYSTEM + "\nStil: " + STYLES[style]
+    if examples:
+        prompt += "\n" + EXAMPLES_INTRO + "".join(f"\n\n<beispiel>\n{e}\n</beispiel>" for e in examples)
+    return prompt
+
+
+def humanize(text: str, style: str, model: str, url: str = OLLAMA_URL, examples: list[str] | None = None) -> str:
     reply = _request(url + "/api/chat", {
         "model": model,
         "stream": False,
         "options": {"num_ctx": OLLAMA_CONTEXT},
-        "messages": [{"role": "system", "content": SYSTEM + "\nStil: " + STYLES[style]},
+        "messages": [{"role": "system", "content": system_prompt(style, examples or [])},
                      {"role": "user", "content": "Schreib um:\n\n" + text}],
     })
     return reply["message"]["content"].strip()
+
+
+FACT = re.compile(r"\d+(?:[.,:/-]\d+)*")
+
+
+def missing_facts(source: str, result: str) -> list[str]:
+    """Zahlen und Daten aus dem Original, die in der Ausgabe nicht mehr vorkommen."""
+    have = set(FACT.findall(result))
+    missing = []
+    for fact in FACT.findall(source):
+        if fact not in have and fact not in missing:
+            missing.append(fact)
+    return missing
+
+
+def shrinkage(source: str, result: str) -> int:
+    """Um wie viel Prozent die Ausgabe kürzer ist als das Original. Negativ heißt länger."""
+    before = len(source.split())
+    return round(100 * (before - len(result.split())) / before) if before else 0
+
+
+def warnings(source: str, result: str) -> str:
+    parts = []
+    gone = missing_facts(source, result)
+    if gone:
+        parts.append("fehlt in der Ausgabe: " + ", ".join(gone))
+    shorter = shrinkage(source, result)
+    if shorter > 20:
+        parts.append(f"Ausgabe ist {shorter} % kürzer als das Original")
+    return ("Achtung: " + "  ·  ".join(parts) + ". Gegenlesen oder noch einmal umschreiben.") if parts else ""
+
+
+def open_folder(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+    if os.name == "nt":
+        os.startfile(path)
+    else:
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", path],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class App:
@@ -361,7 +512,14 @@ class App:
         tk.Label(bar, text="Stil", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
         self.style = ttk.Combobox(bar, state="readonly", width=14, values=list(STYLES), font=("Segoe UI", 10))
         self.style.current(0)
-        self.style.pack(side="left", padx=8)
+        self.style.pack(side="left", padx=(8, 24))
+        tk.Label(bar, text="Stilvorlage", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
+        self.source = ttk.Combobox(bar, state="readonly", width=14, values=STYLE_SOURCES, font=("Segoe UI", 10))
+        self.source.set("Meine Texte" if load_texts(user_dir()) else "Mitgeliefert")
+        self.source.pack(side="left", padx=8)
+        tk.Button(bar, text="Meine Texte …", command=self.open_own_texts, bg=PANEL, fg=FG, activebackground="#333333",
+                  activeforeground=FG, relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
+                  padx=12, pady=4, cursor="hand2").pack(side="left")
         self.update_button = tk.Button(bar, text="Update", command=self.check_update, bg=PANEL, fg=FG,
                                        activebackground="#333333", activeforeground=FG, disabledforeground=MUTED,
                                        relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
@@ -384,6 +542,9 @@ class App:
         self.clear.pack(side="left")
         self.status = tk.Label(bottom, text="Suche Ollama …", bg=BG, fg=MUTED, font=("Segoe UI", 10), anchor="w")
         self.status.pack(side="left", fill="x", expand=True, padx=8)
+
+        self.warning = tk.Label(root, text="", bg=BG, fg=ACCENT, font=("Segoe UI", 10), anchor="w", justify="left")
+        self.warning.pack(side="bottom", fill="x", padx=24)
 
         panes = tk.Frame(root, bg=BG)
         panes.pack(fill="both", expand=True, padx=24, pady=(14, 0))
@@ -706,8 +867,18 @@ class App:
             return
         self.root.destroy()
 
-    def _on_result(self, value: tuple[str, str, float]) -> None:
-        source, result, seconds = value
+    def open_own_texts(self) -> None:
+        folder = user_dir()
+        try:
+            open_folder(folder)
+        except OSError as e:
+            self.status.config(text=f"Der Ordner ließ sich nicht öffnen: {e}", fg=ACCENT)
+            return
+        self.status.config(fg=MUTED, text=(
+            f"Leg dort .txt-Dateien mit Texten ab, die du selbst geschrieben hast. Ordner: {folder}"))
+
+    def _on_result(self, value: tuple[str, str, float, str]) -> None:
+        source, result, seconds, note = value
         self.output.delete("1.0", "end")
         self.output.insert("1.0", result)
         self.busy = False
@@ -724,6 +895,7 @@ class App:
             f"Fertig in {seconds:.0f} s  ·  {changed_share(result, added)} % neu formuliert  ·  "
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
             f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))
+        self.warning.config(text="  ".join(filter(None, [warnings(source, result), note])))
 
     def _on_cleared(self, count: int) -> None:
         self.clear.config(state="normal")
@@ -754,13 +926,16 @@ class App:
         self.busy = True
         self._sync_go()
         self.input.tag_remove("weg", "1.0", "end")
+        self.warning.config(text="")
         self.status.config(text="Schreibe um … das kann bei langen Texten ein, zwei Minuten dauern.", fg=MUTED)
-        model, style = self.model.get(), self.style.get()
+        model, style, source = self.model.get(), self.style.get(), self.source.get()
 
         def work() -> None:
             start = time.time()
+            examples, note = style_examples(source, style, load_texts(user_dir()) if source == "Meine Texte" else [])
             try:
-                self.events.put(("result", (text, humanize(text, style, model, self.url), time.time() - start)))
+                result = humanize(text, style, model, self.url, examples)
+                self.events.put(("result", (text, result, time.time() - start, note)))
             except OllamaError as e:
                 self.events.put(("error", str(e)))
 
@@ -774,7 +949,16 @@ class App:
             self.status.config(text="Ausgabe kopiert.", fg=MUTED)
 
 
+def selftest(target: str) -> None:
+    """Prüfung für den Build: schreibt, welche Version das ist und ob die Beispieltexte in der .exe stecken."""
+    with open(target, "w", encoding="utf-8") as out:
+        json.dump({"build": BUILD, **{g: len(bundled_texts(g)) for g in ("sachlich", "bericht", "locker")}}, out)
+
+
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[1] == "--selftest":
+        selftest(sys.argv[2])
+        return
     try:  # sonst ist die Schrift auf Windows-Laptops mit Skalierung unscharf
         import ctypes
         ctypes.windll.shcore.SetProcessDpiAwareness(1)

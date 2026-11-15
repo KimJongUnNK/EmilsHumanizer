@@ -1,0 +1,15 @@
+(Frei übersetzt aus den Philosoph. Transact. f. 1832, pt. 1. p. 125.)
+
+. Das Vermögen der Spannungs-Elektricität, einen entgegengesetzt elektrischen Zustand in ihrer Nähe hervorzurufen, wird allgemein durch den Ausdruck Verteilung (induktion) bezeichnet; da derselbe in die wissenschaftliche Sprache aufgenommen worden ist, kann es nicht unpassend erscheinen, ihn in ebenso allgemeiner Bedeutung auch für die Kraft zu gebrauchen, vermöge welcher elektrische Ströme benachbarte Körper aus einem indifferenten in einen eigentümlichen versetzen.
+
+) Gewisse Wirkungen der Verteilung elektrischer Ströme sind bereits bekannt, z. B. die der Magnetisirung, Ampère’s Erfahrung bei Annäherung einer Kupferscheibe an eine flache Spirale, seine Wiederholung der außerordentlichen Versuche Arago’s mittelst Elektro-Magnete, und vielleicht noch einige andere. Indess schien es nicht wahrscheinlich, dass damit schon alle durch Verteilung elektrischer Ströme möglichen Erscheinungen zu Ende sein sollten, besonders, da sie eigentlich nur beim Eisen deutlich hervortreten, und also noch eine Anzahl anderer Körper, die bei der Spannungs-Elektricität unzweifelhafte Verteilungs-Erscheinungen darbieten, in Bezug auf Verteilung strömender Elektricität zu untersuchen übrig blieben.
+
+) Da ferner jeder elektrische Strom senkrecht gegen seine Richtung von einer magnetischen Aktion begleitet wird, so würde es, nach Ampère’s schöner Theorie, wie nach jeder andern, sehr ungewöhnlich gewesen sein, wenn nicht ein solcher Strom, innerhalb seines Wirkungskreises, in guten Leitern einen Strom oder eine dem gleichwertige Kraft durch Verteilung erregt haben sollte.
+
+) Diese Betrachtungen und die daraus geschöpfte Hoffnung, Elektricität durch gewöhnlichen Magnetismus erregt zu erhalten, haben mich zu verschiedenen Zeiten veranlasst, Versuche auf die verteilende Wirkung elektrischer Ströme anzustellen. Vor Kurzem endlich bin ich zu entscheidenden Resultaten gelangt, welche nicht nur meine Hoffnungen erfüllt, sondern mich auch zu einer, wie es scheint, vollständigen Erklärung der magnetischen Erscheinungen Arago’s geführt haben, so wie zu der Entdeckung eines neuen Zustandes, der wahrscheinlich auf einige der wichtigsten Wirkungen elektrischer Ströme von großem Einfluss ist.
+
+) Die erlangten Resultate werde ich nicht in der Ordnung, wie sie entdeckt sind, sondern in der beschreiben, wie sie den klarsten Überblick über das Ganze gewähren.
+
+I. Verteillung elektrischer Ströme.
+
+) Ein Kupferdraht, von etwa 26 Fuß Länge und einem zwanzigsten Zoll in Dicke, wurde in Schraubenlinie um einen Holzcylinder gewickelt, und, damit seine Windungen sich nicht berührten, ein Zwirnsfaden zwischen dieselben gelegt. Dann ward die ganze Lage mit Zitz überzogen, und ein zweiter Draht in gleicher Weise darauf gewickelt. So wurden im Ganzen zwölf Drähte, durchschnittlich

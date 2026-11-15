@@ -71,7 +71,11 @@ STEMS = [("theil", "teil"), ("Theil", "Teil"), ("thun", "tun"), ("Thun", "Tun"),
          ("muth", "mut"), ("Muth", "Mut"), ("wuth", "wut"), ("Wuth", "Wut"), ("werth", "wert"), ("Werth", "Wert"),
          ("thür", "tür"), ("Thür", "Tür"), ("thier", "tier"), ("Thier", "Tier"), ("thräne", "träne"),
          ("Thräne", "Träne"), ("giebt", "gibt"), ("gieng", "ging"), ("hieng", "hing"), ("Kameel", "Kamel"),
-         ("Thee", "Tee"), ("Brod", "Brot")]
+         ("Thee", "Tee"), ("Brod", "Brot"), ("thüm", "tüm"), ("Thüm", "Tüm"), ("todt", "tot"), ("Todt", "Tot"),
+         ("Litteratur", "Literatur"), ("litterar", "literar"), ("Congress", "Kongress"), ("October", "Oktober"),
+         ("Central", "Zentral"), ("central", "zentral"), ("Vicepräsident", "Vizepräsident"), ("Comit", "Komit"),
+         ("Concurrenz", "Konkurrenz"), ("Capital", "Kapital"), ("Fabrication", "Fabrikation"), ("ction", "ktion"),
+         ("Princip", "Prinzip"), ("princip", "prinzip")]
 WORDS = {"seyn": "sein", "Seyn": "Sein", "bey": "bei", "Bey": "Bei", "drey": "drei", "frey": "frei", "zwey": "zwei",
          "sey": "sei", "Sey": "Sei", "seyd": "seid", "meynen": "meinen", "Freyheit": "Freiheit"}
 # Was danach noch so aussieht, ist zu alt, um als Vorbild für heutiges Deutsch zu taugen.
@@ -160,6 +164,9 @@ def main(src, dst):
                 if sum(len(p.split()) for p in prose) / words < 0.7:
                     continue
                 for i, e in enumerate(excerpts(prose), start=1):
+                    # Gedichte sind schon aussortiert: Zeilenumbrüche im Absatz stammen von der Druckseite.
+                    e = "\n\n".join(re.sub(r"[ \t]*\n[ \t]*", " ", p) for p in e.split("\n\n"))
+                    e = re.sub(r"  +", " ", e)
                     e = unicodedata.normalize("NFC", modernize(e))
                     key = re.sub(r"\W+", "", e[:300]).lower()
                     if key in seen or not clean_enough(e) or not is_german(e) or archaic_share(e) > 0.8:

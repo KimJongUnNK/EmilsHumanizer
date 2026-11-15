@@ -1,0 +1,15 @@
+In einigen früheren Mitteilungen hatte ich gezeigt, dass die Masse der in den -Strahlen des Radiums bewegten Elektronen mit zunehmender Annäherung an die Lichtgeschwindigkeit bedeutend wächst, und dass das Gesetz des Anwachsens mit den von Hrn. berechneten Formeln übereinstimmt. Die von Hrn. bei der Berechnung gemachte Voraussetzung lautete:
+
+Die gute Übereinstimmung meiner bisherigen Messungen mit den aus dieser Annahme durch Anwendung der schen Gleichungen gezogenen Folgerungen schien zunächst zu dem Schlusse zu berechtigen, dass die Frage nach der Konstitution des Elektrons endgültig gelöst sei.
+
+Eine neuere Untersuchung von Hrn. führte jedoch zu dem überraschenden Ergebnis, dass auch bei gänzlich anderen Annahmen über das Elektron eine Übereinstimmung mit meinen bisherigen Versuchen zu erzielen sei. Hr. zeigte nämlich, dass die Schwierigkeiten, die sich einer Erklärung des negativen Erfolges gewisser Versuche zum Nachweise eines Einflusses 2. und höherer Ordnung der Erdbewegung auf optische und elektrische Erscheinungen entgegenstellten, völlig beseitigt wurden, wenn man annahm, dass alle Körper, eingeschlossen das Elektron, sich in ganz bestimmter Weise bei ihrer Bewegung durch den Äther deformierten.
+
+Ist die Geschwindigkeit des bewegten Systems, die Lichtgeschwindigkeit, und setzt man , so sollten sich alle Abmessungen parallel zur Bewegungsrichtung im Verhältnis verkürzen, die Abmessungen senkrecht zur Bewegungsrichtung sollten unverändert bleiben.
+
+Durch diese Dimensionsänderung wird, wie Hr. zeigte, jeder Einfluss der Absolutbewegung auf optische und elektromagnetische Erscheinungen bis zu beliebig hoher Ordnung, d. h. streng beseitigt.
+
+Obgleich nun die Gleichung für die Abhängigkeit der elektromagnetischen Masse des Elektrons von der Geschwindigkeit, wie sie Hr. aus seiner Annahme des erhält, von der schen Gleichung für das starre Elektron sehr verschieden ist, so ließen sich doch meine Versuchsresultate auch der schen Gleichung anpassen. Der einzige Unterschied bestand darin, dass die Werte von für ein und denselben Kurvenpunkt sich nach um 5 bis 7 Prozent kleiner ergaben, und dass für das Verhältnis:
+
+ebenfalls ein kleinerer Wert herauskam.
+
+Da nun bei meinen bisherigen Messungen die -Werte nicht aus den Apparatkonstanten, sondern aus den Kurven selbst unter Zugrundelegung der schen Formel nach der Methode der kleinsten Quadrate so bestimmt waren, dass ein möglichst guter Anschluss an die photographierte Kurve herauskam, so war eine Entscheidung nicht möglich, denn der mittlere Fehler der beobachteten Kurve gegen die berechnete war auch bei Anwendung der schen Formel kein wesentlich anderer.

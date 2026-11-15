@@ -1,0 +1,11 @@
+II. Dreizehnte Reihe von Experimental-Untersuchungen über Elektricität; von M. Faraday. (Mitgeteilt vom Hrn. Verfasser aus den Phil. Transact. f. 1838 pt. I.)
+
+§. 18. Von der Verteilung. (Fortsetzung.)
+
+. Richten wir nun unsere Aufmerksamkeit auf den allgemeinen Unterschied zwischen positiver und negativer Entladung, um so weit als möglich auszumitteln, was die Ursache dieses Unterschiedes sei, und ob er hauptsächlich von den geladenen Leitern oder von dem dazwischen befindlichen Di-elektricum abhänge; und da er in Luft und Stickgas () groß zu sein scheint, wollen wir die Erscheinungen zuerst in Luft betrachten.
+
+. Der allgemeine Fall ist besser bei Flächen von bedeutender Größe zu verstehen, als bei Spitzen, welche, als secundäre Wirkung, die Bildung von Strömen () mit sich führen. Meine Versuche wurden daher mit Kugeln und Enden von verschiedenen Durchmessern angestellt, und Folgendes sind einige der hauptsächlichsten Resultate.
+
+. Wenn zwei Kugeln von sehr ungleicher Größe, z. B. von 0,5 und von 3 Zoll Durchmesser, auf die Enden von Stäben gesteckt werden, so dass man die eine durch die Elektrisirmaschine elektrisiren und sie durch Funken auf die andere, welche zugleich unisolirt ist, entladen kann, so werden bekanntlich weit längere Funken erhalten, wenn die kleine Kugel positiv und die große negativ ist, als im umgekehrten Fall. Die Funken sind 10 bis 12 Zoll lang, während sie im letzteren Fall nur anderthalb Zoll messen.
+
+. Ehe ich die ferneren Versuche beschreibe, will ich zweier Namen erwähnen, welche ich nebst einigen anderen einem Freunde verdanke, und deren Einführung und Gebrauch ich für zweckmäßig halte. Es ist bei der gewöhnlichen Verteilungswirkung wichtig zu unterscheiden, an welcher geladenen Fläche die Verteilung entspringt und an welcher sie unterhalten wird, d. h. wenn zwei oder mehrere Metallkugeln oder andere Körper in Verteilungsbeziehung stehen, auszudrücken, welche von ihnen ursprünglich geladen sind, und welche durch sie in den entgegengesetzten Elektricitätszustand versetzt sind. Ich schlage vor, die ursprünglich geladenen Körper verteilende (inductric bodies) und die, welche, in Folge der Verteilung, den entgegengesetzten Zustand annehmen, verteilte (inducteous bodies) zu nennen. Diese Unterscheidung ist nicht nur nützlich, weil zwischen der Summe der verteilenden und verteilten

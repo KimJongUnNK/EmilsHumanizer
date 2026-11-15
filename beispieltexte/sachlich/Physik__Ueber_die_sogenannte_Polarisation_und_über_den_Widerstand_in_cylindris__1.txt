@@ -1,0 +1,17 @@
+[Freier Auszug des Wesentlichsten der vom Hrn. Verf. mitgeteilten und unter dem Titel: Sixth Letter on voltaic combinations in den Phil. Transact. f. 1842, pt. II, veröffentlichten Abhandlung.]
+
+Das schöne und einfache Gesetz von Ohm über die elektromotorische Kraft und den Widerstand der Volta’schen Kette, hebt der Verf. an, setzt mich in den Stand, manche der aus meinen früheren Versuchen gezogenen Folgerungen zu berichtigen, und neue Versuche anzustellen, deren Resultate die Dunkelheiten und Zweifelhaftigkeiten meiner früheren Abhandlungen heben werden.
+
+Näher zu seinem Gegenstande übergehend, fährt er dann fort: Prof. Ohm hat (ich glaube unglücklicherweise) die Contacttheorie angenommen; indess kann seine Formel leicht auf beide der rivalisirenden Theorien angewandt werden, und so ist es vielleicht nötig, dass ich, als Anhänger der chemischen Theorie, genau auseinandersetze, welche Meinung ich mit seinen Symbolen verknüpfe.
+
+worin die (sogenannte) elektromotorische Kraft, den Widerstand in den Zellen, den äußeren Widerstand und die Stromstärke (effective force) bezeichnet.
+
+Nach der chemischen Theorie muss nun das Resultat (balance) verschiedener Kräfte sein, nämlich 1) der stärkeren Verwandtschaft der erzeugenden Platte für das Anion des Elektrolyten, 2) der schwächeren Verwandtschaft der leitenden Platte für dasselbe Anion, und 3) der Verwandtschaft des aus dem Elektrolyten abgeschiedenen und an der leitenden Platte angehäuften Kations zu dem Anion. Die beiden letzteren erzeugen die Polarisation (wie man sie eben nicht sehr passend genannt hat) und suchen einen Strom in entgegengesetzter Richtung wie zu erzeugen. Es ist also:
+
+Für eine aus Zellen zusammengesetzte Batterie wird die Formel:
+
+So lange der äußere Widerstand bloß von Metallen entspringt, stimmt die Formel genau mit der Erfahrung, und wenn man daher zugleich die Anzahl der Zellen und den wirksamen Teil der Flächen jeder Zelle verdoppelt, d. h. den Widerstand der Zellen halbirt, bekommt man genau die doppelte Stromstärke, da:
+
+Wenn jedoch ein Voltameter oder ein anderer chemischer Widerstand in die Kette eingeschaltet wird, so hält die Ohm’sche Formel nicht mehr Stich, sobald man nicht die entgegengesetzte elektromotorische Kraft, welche aus der Zersetzung des Elektrolyten und der Anhäufung der Ionen an den Elektroden der Zersetzungszelle entspringt, und mit der früher mit bezeichneten von gleicher Art ist, in Rechnung zieht.
+
+Aus einer Reihe gemeinschaftlich mit mir und meiner Batterie angestellter Versuche, fährt der Verf. fort, schließt Prof. Wheatstone, dass man die entgegengesetzte

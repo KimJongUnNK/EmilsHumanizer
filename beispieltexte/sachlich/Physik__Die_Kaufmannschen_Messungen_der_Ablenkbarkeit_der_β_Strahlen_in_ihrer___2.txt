@@ -1,0 +1,11 @@
+Die Integration der Bewegungsgleichungen erfordert noch die Kenntnis von und als Funktionen von . Die magnetische Feldstärke habe ich als konstant angenommen, und zwar so groß, dass der Wert des „magnetischen Feldintegrals“ der nämliche ist wie bei Herrn . Derselbe beträgt:
+
+Setzt man hierin konstant, so ergibt sich:
+
+und daraus nach den angegebenen Werten von , und :
+
+Die elektrische Feldstärke ist zwischen dem Diaphragma und der photographischen Platte null, zwischen den Kondensatorplatten in gehörigem Abstande von den Rändern konstant. Wir beziehen zunächst mit Herrn die Feldstärke auf ihren Wert im homogenen Teil des Feldes als Einheit und nennen die so gemessene Feldstärke . Dann ist:
+
+Zwischen der Strahlungsquelle und dem Diaphragma habe ich als symmetrisch in bezug auf den Mittelpunkt dieser Strecke: angenommen, so dass, wenn man setzt:
+
+Der Anstieg der elektrischen Feldstärke von der Strahlungsquelle bis zu ihrem konstanten Werte 1 sei als linear angenommen, ebenso also auch der Abfall zum Werte 0 beim Diaphragma. Das heißt:

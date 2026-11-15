@@ -1,0 +1,19 @@
+In dieser Arbeit habe ich mir vorgenommen, in der Formel, durch die ich das Gesetz der Entwicklung des elektrischen Lichtes ausdrücke, eine der Constanten zu bestimmen, nämlich das Verhältniss zwischen den Licht- und Wärmemengen, die von einem selben elektrischen Strom entwickelt werden. Indem ich, durch eine neue Methode, die Empfindlichkeit des Auges maß, glaube ich zu einigen, bei den photometrischen Untersuchungen nötigen Pricipien gelangt zu sein.
+
+In meiner ersten Abhandlung habe ich für die Entwicklung des Lichtes bei elektrischen Entladungen die Formel aufgestellt:
+
+Neue, ganz mit den früheren übereinstimmende Versuche haben ergeben, dass, wenn der Einheit gleich ist, die Intensität instantaner, wie die anderer Lichter, sich umgekehrt verhält wie die Entfernung vom erleuchteten Punkt, und dass man, um das Gesetz der Entwicklung des elektrischen Lichtes auszudrücken, die Formel nehmen muss:
+
+Nach Hrn. Rieß und Hrn. Harris ist proportional mit , worin die auf einem Condensator von der Oberfläche angehäufte Elektricität vorstellt; da nun aus meinen Versuchen folgt, dass auch proportional mit ist, so hat man:
+
+Macht man constant in dieser letzten Formel, so repräsentirt sie das von Hrn. Rieß entwickelte Gesetz der Wärmeentwicklung in einem vom Batteriestrom durchlaufenen Draht.
+
+Da nach dem deutschen Physiker die elektrische Spannung in jedem Punkt des Condensators proportional ist , so glaube ich aus seinen interessanten Arbeiten und den meinigen nachstehende Folgerungen herleiten zu können:
+
+1) Die durch elektrische Entladungen erzeugten Lichtmengen stehen unter sich in demselben Verhältniss, wie die Wärmemengen, die in einem vom Strome dieser Entladung durchlaufenen Draht entwickelt werden. Der eine Effect der Elektricität kann als Maass des anderen dienen, und so begreift man die Möglichkeit, die photometrischen und elektrischen Messungen auf bloße thermometrische zurückzuführen.
+
+2) Die durch elektrische Entladungen entwickelten Licht- und Wärmemengen sind proportional der Spannung des Fluidums auf dem Condensator, stehen im geraden Verhältniss zur Oberfläche dieses selben Condensators und im umgekehrten zu deren Dicke.
+
+Bouguer hat in seinem Traité d’Optique das Resultat seiner Versuche über die Empfindlichkeit seines Auges bekannt gemacht.
+
+Auf ein von einer Kerze beleuchtetes Papier warf er einen schwachen Schatten, erzeugt durch eine zweite Kerze, von gleicher Lichtintensität wie die erstere, aber weiter entfernt von dem Papier gestellt, als diese. Die

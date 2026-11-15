@@ -1,0 +1,19 @@
+II. Über den Dampf als ein Mittel zur Elektricitäts-Erregung, und über die sonderbare Wirkung eines Dampfstrahls auf eine Kugel; von W. G. Armstrong.
+
+(Philosoph. Magaz. Ser. III Vol. XXII p. 1.)
+
+Die Versuche, die ich seit meiner letzten Mitteilung angestellt, haben den Schluss, zu welchen ich damals gelangt, vollkommen bestätigt, nämlich, dass die Elektricitäts-Erregung dort stattfindet, wo der Dampf eine Reibung erfährt. Durch Verbesserung der Ausströmungsweise des Dampfs habe ich die Wirksamkeit desselben so erstaunlich erhöht, dass es sich fragt, ob jemals eine Elektrisirmaschine construirt worden sei, die so viel Elektricität entwickelt als mein Dampfkessel (electrical boiler). Jedenfalls besitzt dieser Kessel über sieben Mal mehr Kraft als eine vortreffliche Maschine mit einer Platte von drei Fuß Durchmesser bei 70maliger Umdrehung in einer Minute. Der Vergleich wurde mittelst eines Entladungs-Elektrometers gemacht; Folgendes wird eine Idee von der von beiden Erregern gelieferten Elektricitätsmenge geben.
+
+Die Flasche des Elektrometers fasste nahe Gallone, und ihre belegte Oberfläche, beide Seiten gerechnet, hielt 198 Quadratzoll. Der gegenseitige Abstand der Elektrometerkugeln betrug ein Drittelzoll.
+
+Anzahl der Entladungen in der Minute, wenn das Instrument mit dem ersten Conductor der Maschine verbunden war:
+
+1==29.
+
+Anzahl der Entladungen in der Minute, bei Verknüpfung mit dem isolirten Dampfkessel:
+
+1==220. Bei Verknüpfung des Elektrometers mit dem Dampfkessel erfolgten die Entladungen so außerordentlich rasch, dass es schwierig war, sie mit Genauigkeit zu zählen; doch ist die angegebene Zahl nicht übertrieben.
+
+Als Dampfkessel diente ein gebrauchter Eisencylinder mit runden Enden, von 3,5 Fuß Länge und 1,5 Fuß im Durchmesser. Er ruhte auf einem eisernen Rahmen, welcher das Feuer enthielt, und der ganze Apparat stand, zur Isolation, auf Glasfüßen. Die Vorrichtung zum Heizen war unglücklicherweise sehr unvollkommen, und daher konnte der Kessel auf längere Zeit nicht so viel Dampf liefern, als zur Hervorbringung der angegebenen Effecte nötig ist. Eine kurze Pause reichte jedoch hin, die erforderliche Spannkraft wieder herzustellen und den Kessel wirksam zu machen.
+
+Es ist bequemer und zweckmäßiger die Elektricität von dem Kessel zu sammeln als von der Dampfwolke; allein um die höchsten Wirkungen von dem Kessel zu erhalten, muss die Elektricität des Dampfs mittelst geeigneter Leiter in den Erdboden geleitet werden.

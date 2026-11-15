@@ -35,9 +35,13 @@ SYSTEM = """Du schreibst deutsche Texte so um, dass sie klingen, als hätte sie 
 - Die Ausgabe ist immer Deutsch. Inhalt, Fakten, Zahlen und Zitate bleiben exakt erhalten. Erfinde nichts dazu.
 - Jede Zahl und jedes Datum aus der Vorlage steht auch in der Ausgabe, in derselben Schreibweise.
 - Die Länge bleibt ungefähr gleich, höchstens 15 % kürzer oder länger. Lass keine Aussage weg.
+  Wenn du eine Floskel streichst, sag dasselbe konkreter, statt es ersatzlos wegzulassen.
+- Quellenangaben wie "(vgl. Berger 2021, S. 45)" bleiben Zeichen für Zeichen erhalten.
 - Übernimm die Schreibweise der Vorlage (ß oder ss, österreichische und Schweizer Wörter bleiben, wie sie sind).
-- Mische die Satzlängen stark: Sätze mit drei Wörtern neben langen, verschachtelten.
-- Absätze sind ungleich lang.
+- Mische die Satzlängen stark. Mindestens jeder vierte Satz hat 25 Wörter oder mehr, mit Nebensätzen und
+  Begründungen ("weil", "obwohl", "sodass"). Mindestens jeder fünfte hat höchstens 7 Wörter.
+  Nie mehr als drei Sätze hintereinander mit ähnlicher Länge.
+- Absätze sind ungleich lang. Du darfst Absätze zusammenlegen oder teilen.
 - Streiche KI-Floskeln: "darüber hinaus", "des Weiteren", "zusammenfassend lässt sich sagen",
   "es ist wichtig zu beachten", "spielt eine entscheidende Rolle", "in der heutigen Zeit",
   "nicht nur ... sondern auch", "eintauchen", "nahtlos", "maßgeblich", "vielfältig", "ganzheitlich".
@@ -78,7 +82,8 @@ AI_TELLS = [
     "vielfältig", "vielzahl", "ganzheitlich", "essenziell", "unerlässlich", "von entscheidender bedeutung",
     "im folgenden", "letztendlich", "insgesamt lässt sich", "facettenreich", "wertvolle einblicke",
     "auf ein neues level", "es gilt zu beachten", "im hinblick auf", "in bezug auf", "gewährleisten",
-    "ermöglicht es", "stellt sicher",
+    "ermöglicht es", "stellt sicher", "spielt eine", "spielen eine", "ein weiterer wichtiger",
+    "ist ebenfalls wichtig",
 ]
 
 # Download in GB, nötiger Grafikspeicher in GB, nötiger RAM in GB ohne passende Grafikkarte. Richtwerte.
@@ -93,7 +98,8 @@ CATALOG = [
 
 MONTHS = "Januar|Jänner|Februar|Feber|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember"
 ABBREVIATIONS = re.compile(
-    r"\b(z\.\s?B|d\.\s?h|u\.\s?a|o\.\s?ä|u\.\s?U|bzw|bspw|usw|ca|Nr|vgl|etc|evtl|ggf|inkl|exkl|sog|Dr|Prof|Abb|Mio|Mrd|St)\."
+    r"\b(z\.\s?B|d\.\s?h|u\.\s?a|o\.\s?ä|u\.\s?U|bzw|bspw|usw|ca|Nr|vgl|etc|evtl|ggf|inkl|exkl|sog|Dr|Prof|Abb|Mio|Mrd|St|"
+    r"S|Abs|Kap|Aufl|Hrsg|hrsg|Bd|Jg|Jh|Tab|ebd|Ebd|ders|f|ff|al|Std|Min|Mag|Ing|Dipl|Fa|Tel|Str|vs)\."
 )
 NUMBER_DOT = re.compile(rf"(\d)\.(?=\d|\s+[a-zäöü]|\s+(?:{MONTHS})\b)")
 
@@ -345,6 +351,28 @@ def user_dir() -> str:
     return os.path.join(base, "EmilsHumanizer", "texte")
 
 
+def settings_path() -> str:
+    return os.path.join(os.path.dirname(user_dir()), "einstellungen.json")
+
+
+def load_settings() -> dict:
+    try:
+        with open(settings_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(data: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(settings_path()), exist_ok=True)
+        with open(settings_path(), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except OSError:
+        pass  # Merken ist Komfort; scheitert es, startet die App eben mit den Standardwerten.
+
+
 def load_texts(folder: str) -> list[str]:
     """Alle .txt-Dateien eines Ordners, alphabetisch. Fehlt der Ordner, ist die Liste leer."""
     try:
@@ -423,15 +451,81 @@ def system_prompt(style: str, examples: list[str]) -> str:
     return prompt
 
 
-def humanize(text: str, style: str, model: str, url: str = OLLAMA_URL, examples: list[str] | None = None) -> str:
+def length_target(text: str) -> tuple[int, int]:
+    words = len(text.split())
+    return round(words * 0.9), round(words * 1.15)
+
+
+def rewrite_request(text: str) -> str:
+    low, high = length_target(text)
+    return (f"Der Text hat {len(text.split())} Wörter. Deine Fassung hat {low} bis {high} Wörter.\n\n"
+            f"Schreib um:\n\n{text}")
+
+
+def _chat(model: str, url: str, messages: list[dict]) -> str:
     reply = _request(url + "/api/chat", {
         "model": model,
         "stream": False,
         "options": {"num_ctx": OLLAMA_CONTEXT},
-        "messages": [{"role": "system", "content": system_prompt(style, examples or [])},
-                     {"role": "user", "content": "Schreib um:\n\n" + text}],
+        "messages": messages,
     })
     return reply["message"]["content"].strip()
+
+
+def humanize(text: str, style: str, model: str, url: str = OLLAMA_URL, examples: list[str] | None = None) -> str:
+    return _chat(model, url, [{"role": "system", "content": system_prompt(style, examples or [])},
+                              {"role": "user", "content": rewrite_request(text)}])
+
+
+def badness(source: str, result: str) -> int:
+    """Wie weit eine Fassung danebenliegt: fehlende Fakten wiegen am schwersten, dann Kürzung, dann Gleichförmigkeit."""
+    lengths = [len(s.split()) for s in sentences(result)]
+    uniform = len(lengths) >= 6 and burstiness(result) < 0.45
+    return 25 * len(missing_facts(source, result)) + max(0, shrinkage(source, result) - 15) + 20 * uniform \
+        + 5 * tell_count(result)
+
+
+def problems(source: str, result: str) -> list[str]:
+    """Was an einer Fassung noch nicht stimmt, als Anweisung für einen zweiten Durchgang. Leer heißt: passt."""
+    found = []
+    shorter = shrinkage(source, result)
+    if shorter > 15:
+        low, high = length_target(source)
+        found.append(f"Deine Fassung hat nur {len(result.split())} Wörter, die Vorlage {len(source.split())}. "
+                     f"Schreib {low} bis {high} Wörter. Erfinde nichts dazu, sondern sag die Gedanken der Vorlage "
+                     "ausführlicher: mit Begründungen, Folgen und Verbindungen zwischen den Aussagen.")
+    gone = missing_facts(source, result)
+    if gone:
+        found.append("Diese Angaben aus der Vorlage fehlen und müssen genau so wieder rein: " + ", ".join(gone) + ".")
+    lengths = [len(s.split()) for s in sentences(result)]
+    if len(lengths) >= 6 and (burstiness(result) < 0.45 or sum(n >= 25 for n in lengths) < len(lengths) / 6):
+        found.append(f"Deine Sätze sind fast alle gleich lang ({min(lengths)} bis {max(lengths)} Wörter, die meisten "
+                     "um die zehn). Baue lange Sätze mit Nebensätzen ein, mindestens jeder vierte mit 25 Wörtern "
+                     "oder mehr, und setze einzelne sehr kurze dazwischen.")
+    if tell_count(result):
+        left = [t for t in AI_TELLS if t in result.lower()]
+        if left:
+            found.append("Diese Floskeln stehen noch drin: " + ", ".join(left) + ". Formuliere sie konkret.")
+    return found
+
+
+def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL,
+                     examples: list[str] | None = None) -> tuple[str, int]:
+    """Schreibt um und bessert einmal nach, wenn die Fassung zu kurz, zu gleichförmig oder unvollständig ist.
+
+    Liefert die bessere der beiden Fassungen und wie viele Durchgänge es gebraucht hat.
+    """
+    messages = [{"role": "system", "content": system_prompt(style, examples or [])},
+                {"role": "user", "content": rewrite_request(text)}]
+    first = _chat(model, url, messages)
+    issues = problems(text, first)
+    if not issues:
+        return first, 1
+    second = _chat(model, url, messages + [
+        {"role": "assistant", "content": first},
+        {"role": "user", "content": "Das passt noch nicht:\n- " + "\n- ".join(issues) +
+         "\n\nGib nur die verbesserte Fassung aus."}])
+    return (second if badness(text, second) <= badness(text, first) else first), 2
 
 
 FACT = re.compile(r"\d+(?:[.,:/-]\d+)*")
@@ -504,27 +598,28 @@ class App:
         bar = tk.Frame(root, bg=BG)
         bar.pack(fill="x", padx=24)
         tk.Label(bar, text="Modell", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
-        self.model = ttk.Combobox(bar, state="readonly", width=28, font=("Segoe UI", 10))
+        self.model = ttk.Combobox(bar, state="readonly", width=22, font=("Segoe UI", 10))
         self.model.pack(side="left", padx=8)
         tk.Button(bar, text="Modelle …", command=self.open_models, bg=PANEL, fg=FG, activebackground="#333333",
                   activeforeground=FG, relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
                   padx=12, pady=4, cursor="hand2").pack(side="left", padx=(0, 24))
         tk.Label(bar, text="Stil", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
         self.style = ttk.Combobox(bar, state="readonly", width=14, values=list(STYLES), font=("Segoe UI", 10))
-        self.style.current(0)
-        self.style.pack(side="left", padx=(8, 24))
+        self.settings = load_settings()
+        self.style.set(self.settings.get("stil") if self.settings.get("stil") in STYLES else list(STYLES)[0])
+        self.style.pack(side="left", padx=8)
+
+        # Zweite Zeile, damit nichts abgeschnitten wird, wenn Windows auf dem Laptop hochskaliert.
+        bar = tk.Frame(root, bg=BG)
+        bar.pack(fill="x", padx=24, pady=(8, 0))
         tk.Label(bar, text="Stilvorlage", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
         self.source = ttk.Combobox(bar, state="readonly", width=14, values=STYLE_SOURCES, font=("Segoe UI", 10))
-        self.source.set("Meine Texte" if load_texts(user_dir()) else "Mitgeliefert")
+        saved = self.settings.get("stilvorlage")
+        self.source.set(saved if saved in STYLE_SOURCES else "Meine Texte" if load_texts(user_dir()) else "Mitgeliefert")
         self.source.pack(side="left", padx=8)
         tk.Button(bar, text="Meine Texte …", command=self.open_own_texts, bg=PANEL, fg=FG, activebackground="#333333",
                   activeforeground=FG, relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
                   padx=12, pady=4, cursor="hand2").pack(side="left")
-        self.update_button = tk.Button(bar, text="Update", command=self.check_update, bg=PANEL, fg=FG,
-                                       activebackground="#333333", activeforeground=FG, disabledforeground=MUTED,
-                                       relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
-                                       padx=12, pady=4, cursor="hand2")
-        self.update_button.pack(side="right")
 
         bottom = tk.Frame(root, bg=BG)
         bottom.pack(side="bottom", fill="x", padx=24, pady=16)
@@ -540,6 +635,12 @@ class App:
                                activebackground="#333333", activeforeground=FG, relief="flat", bd=0, highlightthickness=0,
                                font=("Segoe UI", 11), padx=18, pady=8, cursor="hand2")
         self.clear.pack(side="left")
+        # Unten statt oben: Oben wird es bei Windows-Skalierung auf Laptops zu eng.
+        self.update_button = tk.Button(bottom, text="Update", command=self.check_update, bg=PANEL, fg=FG,
+                                       activebackground="#333333", activeforeground=FG, disabledforeground=MUTED,
+                                       relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 11),
+                                       padx=18, pady=8, cursor="hand2")
+        self.update_button.pack(side="right")
         self.status = tk.Label(bottom, text="Suche Ollama …", bg=BG, fg=MUTED, font=("Segoe UI", 10), anchor="w")
         self.status.pack(side="left", fill="x", expand=True, padx=8)
 
@@ -558,6 +659,8 @@ class App:
         # Sobald die Eingabe bearbeitet wird, stimmen die Markierungen nicht mehr.
         self.input.bind("<Key>", lambda e: self.input.tag_remove("weg", "1.0", "end"))
 
+        for box in (self.model, self.style, self.source):
+            box.bind("<<ComboboxSelected>>", lambda e: self._remember())
         root.bind("<Control-Return>", lambda e: self.run())
         threading.Thread(target=self._load_models, daemon=True).start()
         root.after(100, self._poll)
@@ -592,9 +695,15 @@ class App:
         self.installed = models
         self.model.config(values=models)
         if self.model.get() not in models:
-            self.model.set(PREFERRED_MODEL if PREFERRED_MODEL in models else models[0] if models else "")
+            saved = self.settings.get("modell")
+            self.model.set(saved if saved in models else PREFERRED_MODEL if PREFERRED_MODEL in models
+                           else models[0] if models else "")
         self._sync_go()
         self._refresh_dialog()
+
+    def _remember(self) -> None:
+        self.settings.update(modell=self.model.get(), stil=self.style.get(), stilvorlage=self.source.get())
+        save_settings(self.settings)
 
     def _sync_go(self) -> None:
         self.go.config(state="normal" if self.installed and not self.busy else "disabled")
@@ -877,8 +986,8 @@ class App:
         self.status.config(fg=MUTED, text=(
             f"Leg dort .txt-Dateien mit Texten ab, die du selbst geschrieben hast. Ordner: {folder}"))
 
-    def _on_result(self, value: tuple[str, str, float, str]) -> None:
-        source, result, seconds, note = value
+    def _on_result(self, value: tuple[str, str, float, str, int]) -> None:
+        source, result, seconds, note, passes = value
         self.output.delete("1.0", "end")
         self.output.insert("1.0", result)
         self.busy = False
@@ -892,7 +1001,8 @@ class App:
             for start, end in gone:
                 self.input.tag_add("weg", f"1.0+{lead + start}c", f"1.0+{lead + end}c")
         self.status.config(fg=MUTED, text=(
-            f"Fertig in {seconds:.0f} s  ·  {changed_share(result, added)} % neu formuliert  ·  "
+            f"Fertig in {seconds:.0f} s{' (nachgebessert)' if passes > 1 else ''}  ·  "
+            f"{changed_share(result, added)} % neu formuliert  ·  "
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
             f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))
         self.warning.config(text="  ".join(filter(None, [warnings(source, result), note])))
@@ -934,8 +1044,8 @@ class App:
             start = time.time()
             examples, note = style_examples(source, style, load_texts(user_dir()) if source == "Meine Texte" else [])
             try:
-                result = humanize(text, style, model, self.url, examples)
-                self.events.put(("result", (text, result, time.time() - start, note)))
+                result, passes = humanize_checked(text, style, model, self.url, examples)
+                self.events.put(("result", (text, result, time.time() - start, note, passes)))
             except OllamaError as e:
                 self.events.put(("error", str(e)))
 

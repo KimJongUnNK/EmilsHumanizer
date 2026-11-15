@@ -10,6 +10,12 @@ import pytest
 import humanizer as h
 
 
+@pytest.fixture(autouse=True)
+def eigener_ordner(tmp_path, monkeypatch):
+    """Kein Test liest oder schreibt die echten Einstellungen und Texte des Rechners, auf dem er läuft."""
+    monkeypatch.setattr(h, "user_dir", lambda: str(tmp_path / "nutzer" / "texte"))
+
+
 @pytest.fixture
 def fake_ollama():
     seen = []
@@ -578,3 +584,120 @@ def test_app_waehlt_meine_texte_wenn_vorhanden(root, fake_ollama, monkeypatch, t
     app.run()
     pump(root, lambda: seen[-1][0] == "/api/chat")
     assert "Mein eigener Satz aus der Hausarbeit." in seen[-1][1]["messages"][0]["content"]
+
+
+# --- Ziel-Länge und automatisches Nachbessern ---
+UNIFORM = " ".join(f"Satz Nummer {i} hat genau sieben Wörter drin." for i in range(10))
+VARIED = ("Kurz. " + "Dieser Satz ist dagegen ziemlich lang, weil er mehrere Nebensätze hat, die erklären, warum "
+          "etwas passiert, obwohl es niemand erwartet hätte, sodass am Ende alle staunen. ") * 5
+
+
+def test_quellenangaben_trennen_keinen_satz():
+    text = "Besucher erwarten Planung (vgl. Berger 2021, S. 45). Die Anforderungen steigen. Siehe Kap. 3 und Abs. 2."
+    assert len(h.sentences(text)) == 3
+
+
+def test_rewrite_request_nennt_ziel_laenge():
+    request = h.rewrite_request(" ".join(["wort"] * 100))
+    assert "hat 100 Wörter" in request and "90 bis 115 Wörter" in request
+
+
+def test_problems():
+    assert h.problems(VARIED, VARIED) == []
+    found = h.problems(UNIFORM + " " + UNIFORM + " Am 24.07.2010 war es so.", UNIFORM)
+    assert any("nur" in f and "Wörter" in f for f in found)
+    assert any("24.07.2010" in f for f in found)
+    assert any("gleich lang" in f for f in found)
+    assert any("spielt eine" in f for f in h.problems(VARIED, VARIED + " Das spielt eine Rolle."))
+
+
+@pytest.fixture
+def scripted_ollama():
+    """Ollama-Ersatz, der der Reihe nach vorgegebene Antworten liefert."""
+    replies, seen = [], []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({"message": {"content": replies.pop(0)}}).encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}", replies, seen
+    server.shutdown()
+
+
+def test_humanize_checked_passt_gleich(scripted_ollama):
+    url, replies, seen = scripted_ollama
+    replies.append(VARIED)
+    assert h.humanize_checked(VARIED, "Akademisch", "m", url) == (VARIED.strip(), 1)
+    assert len(seen) == 1 and "Wörter. Deine Fassung hat" in seen[0]["messages"][1]["content"]
+
+
+def test_humanize_checked_bessert_nach(scripted_ollama):
+    url, replies, seen = scripted_ollama
+    replies += [UNIFORM[:150], VARIED]
+    result, passes = h.humanize_checked(VARIED, "Akademisch", "m", url)
+    assert passes == 2 and result == VARIED.strip()
+    follow_up = seen[1]["messages"]
+    assert [m["role"] for m in follow_up] == ["system", "user", "assistant", "user"]
+    assert follow_up[2]["content"] == UNIFORM[:150].strip() and "passt noch nicht" in follow_up[3]["content"]
+
+
+def test_humanize_checked_behaelt_erste_wenn_zweite_schlechter(scripted_ollama):
+    url, replies, _ = scripted_ollama
+    first = VARIED[:len(VARIED) // 2]
+    replies += [first, "Kaputt."]
+    result, passes = h.humanize_checked(VARIED + " Am 24.07.2010.", "Akademisch", "m", url)
+    assert passes == 2 and result == first.strip()
+
+
+def test_app_zeigt_nachgebessert(root, scripted_ollama, monkeypatch):
+    url, replies, _ = scripted_ollama
+    monkeypatch.setattr(h, "ensure_ollama", lambda url: ["m"])
+    monkeypatch.setattr(h, "user_dir", lambda: "/gibt/es/nicht")
+    replies += [UNIFORM[:150], VARIED]
+    app = h.App(root, url)
+    pump(root, lambda: str(app.go["state"]) == "normal")
+    app.input.insert("1.0", VARIED)
+    app.run()
+    pump(root, lambda: "Fertig" in app.status["text"])
+    assert "(nachgebessert)" in app.status["text"]
+    assert app.update_button.master is app.go.master
+
+
+def test_badness_ordnet_fassungen():
+    source = VARIED + " Am 24.07.2010."
+    assert h.badness(source, source) == 0
+    assert h.badness(source, VARIED) == 25
+    assert h.badness(source, "Kaputt.") > h.badness(source, VARIED[:len(VARIED) // 2] + " Am 24.07.2010.")
+
+
+def test_app_merkt_sich_auswahl(root, fake_ollama, monkeypatch, tmp_path):
+    url, _, _ = fake_ollama
+    monkeypatch.setattr(h, "user_dir", lambda: str(tmp_path / "texte"))
+    app = h.App(root, url)
+    pump(root, lambda: str(app.go["state"]) == "normal")
+    assert app.model.get() == "gemma3:12b" and app.style.get() == "Natürlich"
+    app.model.set("llama3.2:3b")
+    app.style.set("Akademisch")
+    app.source.set("Aus")
+    app.model.event_generate("<<ComboboxSelected>>")
+    pump(root, lambda: (tmp_path / "einstellungen.json").exists())
+    app2 = h.App(root, url)
+    pump(root, lambda: str(app2.go["state"]) == "normal")
+    assert (app2.model.get(), app2.style.get(), app2.source.get()) == ("llama3.2:3b", "Akademisch", "Aus")
+
+
+def test_einstellungen_kaputt_oder_fremd(tmp_path, monkeypatch):
+    monkeypatch.setattr(h, "user_dir", lambda: str(tmp_path / "texte"))
+    assert h.load_settings() == {}
+    (tmp_path / "einstellungen.json").write_text("{kaputt", encoding="utf-8")
+    assert h.load_settings() == {}
+    (tmp_path / "einstellungen.json").write_text("[1, 2]", encoding="utf-8")
+    assert h.load_settings() == {}

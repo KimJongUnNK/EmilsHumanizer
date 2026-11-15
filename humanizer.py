@@ -460,9 +460,24 @@ def crutches(result: str) -> list[str]:
 CITATION = re.compile(r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)", re.I)
 
 
+def citation_parts(citation: str) -> tuple[list[str], list[str]]:
+    """Autorennamen und Zahlen (Jahr, Seite) einer Quellenangabe wie "(vgl. Hofer/Lindner 2019, S. 112)"."""
+    inner = re.sub(r"^\((?:vgl\.|siehe|s\.|nach|zit\. n\.)\s*", "", citation, flags=re.I).rstrip(")")
+    authors = [w for w in re.findall(r"[A-ZÄÖÜ][\wäöüß-]+", inner) if w not in ("S", "Vgl")]
+    return authors, re.findall(r"\d+", inner)
+
+
+def narrative_citation(citation: str, result: str) -> bool:
+    """Steht die Quelle als Fließtext da, etwa "wie Hofer und Lindner (2019, S. 112) zeigen"? Das ist gültig."""
+    authors, numbers = citation_parts(citation)
+    return bool(authors) and any(all(a in s for a in authors) and all(n in s for n in numbers)
+                                 for s in sentences(result))
+
+
 def missing_citations(source: str, result: str) -> list[str]:
-    """Quellenangaben wie "(vgl. Berger 2021, S. 45)", die nicht mehr Zeichen für Zeichen in der Ausgabe stehen."""
-    return [c for c in dict.fromkeys(CITATION.findall(source)) if c not in result]
+    """Quellenangaben wie "(vgl. Berger 2021, S. 45)", die weder wörtlich noch als Fließtext-Zitat mit denselben
+    Autoren, Jahr und Seite in der Ausgabe stehen."""
+    return [c for c in dict.fromkeys(CITATION.findall(source)) if c not in result and not narrative_citation(c, result)]
 
 
 def doubled_citations(source: str, result: str) -> list[str]:
@@ -753,6 +768,10 @@ def added_facts(source: str, result: str) -> list[str]:
     ist das eine erfundene Aussage.
     """
     have = set(FACT.findall(CITATION.sub(" ", source)))
+    for citation in CITATION.findall(source):
+        # Nur wenn die Klammer-Angabe aufgelöst wurde; steht sie noch da, ist ein "seit 2021" daneben erfunden.
+        if citation not in result and narrative_citation(citation, result):
+            have.update(citation_parts(citation)[1])
     added = []
     for fact in FACT.findall(CITATION.sub(" ", result)):
         if fact not in have and fact not in added:

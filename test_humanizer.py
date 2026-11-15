@@ -705,7 +705,7 @@ def test_paragraph_request():
 
 def test_missing_citations_und_unchanged():
     assert h.missing_citations(PARA, PARA) == []
-    assert h.missing_citations(PARA, PARA.replace("S. 112", "S.112")) == ["(vgl. Hofer 2019, S. 112)"]
+    assert h.missing_citations(PARA, PARA.replace("S. 112", "S. 121")) == ["(vgl. Hofer 2019, S. 112)"]
     assert len(h.unchanged_sentences(PARA, PARA)) == 3
     assert h.unchanged_sentences(PARA, "Ganz anders formuliert. Wirklich ganz anders.") == []
     warning = h.warnings(PARA, PARA)
@@ -860,3 +860,13 @@ def test_wiederholung_und_umbrueche():
     assert len(h.repeated_sentences(text)) == 1
     assert h.repeated_sentences(VARIED) == []
     assert h.flatten("Erste Zeile.\nZweite Zeile.\n\n  Dritte.") == "Erste Zeile. Zweite Zeile. Dritte."
+
+
+def test_quelle_als_fliesstext_zaehlt():
+    source = "Der Bedarf liegt bei bis zu 1,2 Gigawattstunden (vgl. Hofer/Lindner 2019, S. 112)."
+    narrative = "Wie Hofer und Lindner (2019, S. 112) zeigen, liegt der Bedarf bei bis zu 1,2 Gigawattstunden."
+    assert h.citation_parts("(vgl. Hofer/Lindner 2019, S. 112)") == (["Hofer", "Lindner"], ["2019", "112"])
+    assert h.missing_citations(source, narrative) == [] and h.added_facts(source, narrative) == []
+    wrong_page = narrative.replace("S. 112", "S. 113")
+    assert h.missing_citations(source, wrong_page) == ["(vgl. Hofer/Lindner 2019, S. 112)"]
+    assert h.added_facts(source, wrong_page) == ["2019", "113"]

@@ -54,7 +54,9 @@ Danach prüft sie jeden Absatz:
 - fehlen Zahlen, Daten oder Quellenangaben, oder haben Zahlen ihre Einheit verloren ("60 %" wird zu "60")? Sind welche dazugekommen, steht eine Quellenangabe doppelt?
 - fehlen Einschränkungen wie Orte, Zeiträume oder Gruppen ("In Österreich", "europäischen Festivalveranstalter", "am Mischpult", "bei einem mehrtägigen Festival")? Die sucht die App vor dem Umschreiben nach festen Regeln aus dem Absatz heraus, gibt sie dem Modell als Pflichtangaben mit und prüft danach, ob ihre Kernwörter noch dastehen.
 - steht jede Quellenangabe noch bei der Aussage, die sie im Original belegt, oder ist sie zu einer anderen gerutscht?
-- wiederholt ein Satz, was schon dasteht? Eine Jahreszahl, die nur in einer Quellenangabe stand und plötzlich im Fließtext auftaucht, gilt als erfunden.
+- wiederholt ein Satz, was schon dasteht?
+- behauptet der Absatz mit "obwohl", "jedoch", "sodass", "daher" & Co. einen Gegensatz oder eine Folge, die das Original nicht nennt?
+- gibt es Sätze ohne Grundlage im Original, etwa "Das gilt für alle Bereiche." oder einen dazugedichteten Grund? Eine Jahreszahl, die nur in einer Quellenangabe stand und plötzlich im Fließtext auftaucht, gilt als erfunden.
 - wiederholen sich Wendungen wie "… stellt … dar" oder "ist von … Bedeutung" über mehrere Absätze?
 - ist der Absatz mehr als 20 % kürzer oder länger?
 - passen Satzanzahl und Satzlängen zum Bauplan?
@@ -63,7 +65,7 @@ Danach prüft sie jeden Absatz:
 
 Findet sie etwas, schickt sie dem Modell eine konkrete Rückmeldung, höchstens zweimal pro Absatz, und behält die beste Fassung. Die Statuszeile zeigt den Fortschritt ("Absatz 3 von 6") und am Ende, wie oft nachgebessert wurde. Was danach noch fehlt, erfunden oder kaum verändert ist, steht rot unter den Textfeldern.
 
-Nicht erkannt werden erfundene Aussagen ohne Zahl (etwa ein dazugedichteter Grund), verdrehte Ursache und Wirkung und Wiederholungen mit ganz anderen Worten. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
+Nicht erkannt werden verdrehte Zusammenhänge ohne Signalwort ("das Konzept begrenzt die Dichte" statt "die Verordnung schreibt sie vor"), erfundene Teilsätze in sonst passenden Sätzen und Wiederholungen mit ganz anderen Worten. Ein Satz, der fast nur aus Synonymen besteht, kann umgekehrt fälschlich als "ohne Grundlage" gemeldet werden. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
 
 ## Update
 

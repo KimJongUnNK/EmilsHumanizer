@@ -36,6 +36,11 @@ SYSTEM = """Du schreibst deutsche Texte so um, dass sie klingen, als hätte sie 
 - Ändere keine Ursache-Wirkung-Beziehungen und keine Zuständigkeiten. Was eine Vorschrift verlangt, bleibt eine
   Vorschrift. Was eine Studie zeigt, bleibt bei der Studie. Einschränkungen wie Orte, Zeiträume und Gruppen bleiben.
 - Jede Quellenangabe bleibt bei genau der Aussage, die sie belegt. Sag nichts zweimal.
+- Verbinde Aussagen nur so, wie die Vorlage sie verbindet. "obwohl", "jedoch", "trotzdem" nur bei einem Gegensatz,
+  den die Vorlage nennt. "sodass", "wodurch", "daher" nur bei einer Folge, die die Vorlage nennt. Sonst neutral
+  verbinden: Relativsatz, Apposition, Doppelpunkt, "und", oder zwei Sätze stehen lassen.
+- Kurze Sätze bringen eine Aussage der Vorlage auf den Punkt. Sie fügen nichts hinzu, keine Sätze wie
+  "Das gilt für alle Bereiche.".
 - Die Länge bleibt ungefähr gleich. Lass keine Aussage weg. Wenn du eine Floskel streichst, sag dasselbe
   konkreter, statt es ersatzlos wegzulassen.
 - Quellenangaben wie "(vgl. Berger 2021, S. 45)" bleiben Zeichen für Zeichen erhalten.
@@ -563,9 +568,14 @@ def plan_fit(plan: list[int], result: str) -> float:
     lengths = [len(s.split()) for s in sentences(result)]
     if not lengths:
         return 1.0
-    pairs = list(zip(plan, lengths))
-    missing = abs(len(plan) - len(lengths))
-    return (sum(abs(a - b) / a for a, b in pairs) + missing) / max(len(plan), len(lengths))
+
+    def error(target: list[int]) -> float:
+        missing = abs(len(target) - len(lengths))
+        return (sum(abs(a - b) / a for a, b in zip(target, lengths)) + missing) / max(len(target), len(lengths))
+
+    # Ein Satz weniger als geplant ist erlaubt: Das Streichen eines Füllsatzes soll nicht am Bauplan scheitern.
+    shorter = [plan[:i] + plan[i + 1:] for i in range(len(plan))] if len(lengths) == len(plan) - 1 else []
+    return min([error(plan)] + [error(t) for t in shorter])
 
 
 HABITS = [
@@ -591,9 +601,12 @@ def paragraph_request(paragraph: str, plan: list[int], avoid: list[str] | None =
     required = list(dict.fromkeys(CITATION.findall(paragraph) + [surface for _, _, surface in facts(paragraph)]))
     lines = "\n".join(f"Satz {i}: etwa {n} Wörter" for i, n in enumerate(plan, start=1))
     return (f"Schreib diesen Absatz um.\n\nBauplan: genau {len(plan)} Sätze.\n{lines}\n\n"
-            "So kommst du auf den Bauplan: Sätze zusammenlegen (mit \"obwohl\", \"während\", \"sodass\", "
-            "\"wodurch\" oder Relativsätzen), lange Sätze teilen, die Reihenfolge der Aussagen im Absatz ändern, "
-            "ein anderes Subjekt wählen, aktiv statt passiv. Kein Satz darf so bleiben, wie er in der Vorlage steht.\n"
+            "So kommst du auf den Bauplan: Sätze zusammenlegen, lange Sätze teilen, die Reihenfolge der Aussagen im "
+            "Absatz ändern, ein anderes Subjekt wählen, aktiv statt passiv. Kein Satz darf so bleiben, wie er in der "
+            "Vorlage steht. Verbinde zusammengelegte Sätze nur so, wie die Vorlage die Aussagen verbindet: kein "
+            "\"obwohl\" ohne Gegensatz in der Vorlage, kein \"sodass\" ohne Folge in der Vorlage. Sonst Relativsatz, "
+            "Apposition, Doppelpunkt oder \"und\". Ein kurzer Satz bringt eine Aussage der Vorlage auf den Punkt "
+            "und fügt nichts hinzu.\n"
             + ("Diese Angaben müssen wörtlich vorkommen, Zahlen als Ziffern wie in der Vorlage: "
                + "; ".join(required) + "\n" if required else "")
             + ("Diese Einschränkungen müssen erhalten bleiben: " + "; ".join(qualifiers) + "\n" if qualifiers else "")
@@ -615,6 +628,13 @@ def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[st
                      "und muss bei genau diesem Inhalt stehen.")
     for sentence in repeated_sentences(result):
         found.append(f'Dieser Satz wiederholt, was schon dasteht, streich ihn oder sag etwas anderes: "{sentence[:70]}…"')
+    for word, extra, where in new_connectors(source, result):
+        kind = "einen Gegensatz" if word in CONNECTORS["Gegensatz"] else "eine Folge"
+        found.append(f'Mit "{word}" behauptest du {kind}, den die Vorlage nicht nennt: ' +
+                     " / ".join(f'"{s[:80]}…"' for s in where[:3]) +
+                     ". Verbinde diese Aussagen neutral oder lass zwei Sätze stehen.")
+    for sentence in unsupported_sentences(source, result):
+        found.append(f'Dieser Satz hat keine Grundlage in der Vorlage, streich ihn: "{sentence}"')
     repeated = [h for h in habits(result) if h in (avoid or [])]
     if repeated:
         found.append("Diese Wendungen stehen schon in früheren Absätzen, formuliere hier anders: " + ", ".join(repeated) + ".")
@@ -651,7 +671,8 @@ def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str
                       qualifiers: list[str] | None = None) -> float:
     words, target = len(result.split()), len(source.split())
     fidelity = 20 * len(missing_qualifiers(qualifiers or [], result)) + 25 * len(misplaced_citations(source, result)) \
-        + 10 * len(repeated_sentences(result))
+        + 10 * len(repeated_sentences(result)) + 20 * sum(extra for _, extra, _ in new_connectors(source, result)) \
+        + 20 * len(unsupported_sentences(source, result))
     repeated = len([h for h in habits(result) if h in (avoid or [])])
     off = max(0.0, abs(words - target) / max(target, 1) - 0.2) * 100
     return (25 * (len(missing_facts(source, result)) + len(added_facts(source, result))
@@ -791,6 +812,43 @@ def core_stems(text: str) -> set[str]:
     return {w.lower()[:6] for w in words if w.lower() not in STOPWORDS}
 
 
+CONNECTORS = {
+    "Gegensatz": ["obwohl", "obgleich", "obschon", "trotzdem", "dennoch", "jedoch", "allerdings", "wenngleich"],
+    "Folge": ["sodass", "wodurch", "daher", "deshalb", "deswegen", "folglich", "somit", "weshalb", "infolgedessen"],
+}
+
+
+def new_connectors(source: str, result: str) -> list[tuple[str, int, list[str]]]:
+    """Gegensatz- und Folge-Wörter, die die Ausgabe öfter benutzt als die Vorlage. Liefert (Wort, wie oft mehr, Sätze).
+
+    Ein neues "obwohl" behauptet einen Gegensatz, ein neues "sodass" eine Folge, die vielleicht nirgends steht.
+    """
+    found = []
+    for words in CONNECTORS.values():
+        for word in words:
+            pattern = re.compile(r"\b%s\b" % word, re.I)
+            extra = len(pattern.findall(result)) - len(pattern.findall(source))
+            if extra > 0:
+                found.append((word, extra, [s for s in sentences(result) if pattern.search(s)]))
+    return found
+
+
+def unsupported_sentences(source: str, result: str) -> list[str]:
+    """Sätze der Ausgabe, deren Kernwörter zu weniger als einem Drittel in der Vorlage vorkommen, also
+    hinzugedichtet sind, etwa "Das gilt für alle Bereiche."."""
+    # Als Teil eines zusammengesetzten Worts zählt ein Stamm auch: "Veranstalter" steckt in "Festivalveranstalter".
+    text = _mask(source).lower()
+    numbers = {n for n, _, _ in facts(source)}
+    found = []
+    for sentence in sentences(result):
+        stems = core_stems(sentence)
+        if any(n in numbers for n, _, _ in facts(sentence)):
+            continue  # trägt eine Zahl aus dem Original, ist also belegt
+        if len(stems) >= 2 and sum(st in text for st in stems) / len(stems) < 1 / 3:
+            found.append(sentence)
+    return found
+
+
 def misplaced_citations(source: str, result: str) -> list[tuple[str, str]]:
     """Quellenangaben, die jetzt bei einer anderen Aussage stehen als im Original. Liefert (Quelle, Originalsatz).
 
@@ -880,6 +938,13 @@ def warnings(source: str, result: str, qualifiers: list[str] | None = None) -> s
         parts.append(f"Quelle verrutscht: {citation}")
     if repeated_sentences(result):
         parts.append(f"{len(repeated_sentences(result))} Satz/Sätze wiederholt")
+    added_links = new_connectors(source, result)
+    if added_links:
+        parts.append("neue Begründung oder Gegensatz, prüfen: " +
+                     ", ".join(f"{word} ({extra}×)" for word, extra, _ in added_links))
+    invented = unsupported_sentences(source, result)
+    if invented:
+        parts.append("ohne Grundlage im Original: " + " / ".join(f'"{s[:50]}"' for s in invented))
     gone = missing_facts(source, result)
     if gone:
         parts.append("fehlt in der Ausgabe: " + ", ".join(gone))

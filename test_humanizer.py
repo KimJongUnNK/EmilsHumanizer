@@ -693,7 +693,7 @@ def test_sentence_plan():
 def test_plan_fit():
     assert h.plan_fit([2, 3], "Eins zwei. Drei vier fünf.") == 0
     assert h.plan_fit([10, 10], "Eins zwei. Drei vier fünf.") > 0.4
-    assert h.plan_fit([2, 3, 4], "Eins zwei. Drei vier fünf.") > 0.3
+    assert h.plan_fit([2, 3, 4, 5], "Eins zwei. Drei vier fünf.") > 0.3
     assert h.plan_fit([2], "") == 1.0
 
 
@@ -870,3 +870,47 @@ def test_quelle_als_fliesstext_zaehlt():
     wrong_page = narrative.replace("S. 112", "S. 113")
     assert h.missing_citations(source, wrong_page) == ["(vgl. Hofer/Lindner 2019, S. 112)"]
     assert h.added_facts(source, wrong_page) == ["2019", "113"]
+
+
+# --- Verknüpfungen und Sätze ohne Grundlage ---
+SAFETY = ("Ein Crowd-Management-Konzept umfasst die Analyse von Besucherströmen und die Schulung des Personals. "
+          "Gemäß der Versammlungsstättenverordnung sind bei Stehplätzen 2 Personen pro Quadratmeter zulässig.")
+
+
+def test_neue_verknuepfungen():
+    wrong = ("Das Personal muss geschult werden, obwohl die Versammlungsstättenverordnung bei Stehplätzen nur "
+             "2 Personen pro Quadratmeter zulässt. Die Sicherheit steht vorn, sodass Besucherströme analysiert werden.")
+    found = h.new_connectors(SAFETY, wrong)
+    assert [(w, n) for w, n, _ in found] == [("obwohl", 1), ("sodass", 1)]
+    assert "obwohl" in found[0][2][0]
+    assert h.new_connectors("Obwohl es regnet, kommen alle.", "Alle kommen, obwohl es regnet.") == []
+    text = " ".join(h.paragraph_problems(SAFETY, wrong, [14, 13]))
+    assert 'Mit "obwohl" behauptest du einen Gegensatz' in text and 'Mit "sodass" behauptest du eine Folge' in text
+    assert "neue Begründung oder Gegensatz, prüfen: obwohl (1×), sodass (1×)" in h.warnings(SAFETY, wrong)
+
+
+def test_saetze_ohne_grundlage():
+    filler = SAFETY + " Das gilt für alle Bereiche."
+    assert h.unsupported_sentences(SAFETY, filler) == ["Das gilt für alle Bereiche."]
+    reworded = ("Das Personal zu schulen und Besucherströme zu analysieren, gehört zu jedem Crowd-Management-Konzept. "
+                "Bei Stehplätzen erlaubt die Verordnung 2 Personen pro Quadratmeter.")
+    assert h.unsupported_sentences(SAFETY, reworded) == []
+    assert h.unsupported_sentences("Es nutzen 38 % der europäischen Festivalveranstalter solche Systeme.",
+                                   "Viele Veranstalter nutzen sie schon.") == []
+    assert h.unsupported_sentences(SAFETY, SAFETY + " Dabei starben 21 Menschen bei Unfällen.") == \
+        ["Dabei starben 21 Menschen bei Unfällen."]
+    assert 'keine Grundlage in der Vorlage, streich ihn: "Das gilt für alle Bereiche."' in \
+        " ".join(h.paragraph_problems(SAFETY, filler, [14, 13, 5]))
+    assert "ohne Grundlage im Original" in h.warnings(SAFETY, filler)
+
+
+def test_ein_satz_weniger_als_geplant_ist_erlaubt():
+    assert h.plan_fit([5, 2, 3], "Eins zwei drei vier fünf. Eins zwei drei.") == 0
+    assert h.plan_fit([5, 3], "Eins zwei drei vier fünf.") == 0
+    assert h.plan_fit([5, 3, 4, 6], "Eins zwei drei vier fünf.") > 0.4
+
+
+def test_auftrag_ohne_alte_verbindungsliste():
+    request = h.paragraph_request(PARA, [10, 10, 10])
+    assert "mit \"obwohl\", \"während\", \"sodass\"" not in request
+    assert "kein \"obwohl\" ohne Gegensatz in der Vorlage" in request

@@ -27,25 +27,19 @@ PREFERRED_MODEL = "gemma3:12b"
 # Ollamas Standard-Kontext ist klein und schneidet lange Texte stillschweigend ab.
 # Platz für Text, Ausgabe und Stilvorlage zusammen.
 OLLAMA_CONTEXT = 16384
-# Wie viele Wörter Stilvorlage höchstens vor jeden Text kommen.
-EXAMPLE_BUDGET = 1200
-EXAMPLE_COUNT = 3
 
 SYSTEM = """Du schreibst deutsche Texte so um, dass sie klingen, als hätte sie ein Mensch geschrieben. Regeln:
 - Die Ausgabe ist immer Deutsch. Inhalt, Fakten, Zahlen und Zitate bleiben exakt erhalten. Erfinde nichts dazu:
   keine neuen Fakten, Zahlen, Beispiele, Ursachen oder Folgen, die nicht in der Vorlage stehen. Das gilt besonders
   neben Quellenangaben, denn was bei "(vgl. …)" steht, muss genau so aus der Vorlage stammen.
-- Jeder Absatz der Vorlage kommt mit seiner Aussage auch in der Ausgabe vor, auch der Schluss.
 - Jede Zahl und jedes Datum aus der Vorlage steht auch in der Ausgabe, in derselben Schreibweise.
-- Die Länge bleibt ungefähr gleich, höchstens 15 % kürzer oder länger. Lass keine Aussage weg.
-  Wenn du eine Floskel streichst, sag dasselbe konkreter, statt es ersatzlos wegzulassen.
+- Die Länge bleibt ungefähr gleich. Lass keine Aussage weg. Wenn du eine Floskel streichst, sag dasselbe
+  konkreter, statt es ersatzlos wegzulassen.
 - Quellenangaben wie "(vgl. Berger 2021, S. 45)" bleiben Zeichen für Zeichen erhalten.
 - Übernimm die Schreibweise der Vorlage (ß oder ss, österreichische und Schweizer Wörter bleiben, wie sie sind).
 - Häng Begründungen nicht ständig mit ", weil …" an und beginne Sätze nicht ständig mit "Zudem" oder "Denn".
-- Mische die Satzlängen stark. Mindestens jeder vierte Satz hat 25 Wörter oder mehr, mit Nebensätzen und
-  Begründungen ("weil", "obwohl", "sodass"). Mindestens jeder fünfte hat höchstens 7 Wörter.
-  Nie mehr als drei Sätze hintereinander mit ähnlicher Länge.
-- Absätze sind ungleich lang. Du darfst Absätze zusammenlegen oder teilen.
+- Halte dich genau an den Bauplan für Satzanzahl und Satzlängen. Lange Sätze bekommen Nebensätze,
+  kurze sind wirklich kurz.
 - Streiche KI-Floskeln: "darüber hinaus", "des Weiteren", "zusammenfassend lässt sich sagen",
   "es ist wichtig zu beachten", "spielt eine entscheidende Rolle", "in der heutigen Zeit",
   "nicht nur ... sondern auch", "eintauchen", "nahtlos", "maßgeblich", "vielfältig", "ganzheitlich".
@@ -54,11 +48,11 @@ SYSTEM = """Du schreibst deutsche Texte so um, dass sie klingen, als hätte sie 
 - Keine aus dem Englischen übersetzte Satzstellung. Schreib, wie man auf Deutsch wirklich formuliert.
 - Nimm konkrete Wörter statt abstrakter. Sätze dürfen mit "Und" oder "Aber" anfangen.
 - Wo das Register es erlaubt: Modalpartikeln (halt, eben, ja, schon, eigentlich), sparsam.
-- Gib nur den umgeschriebenen Text aus, sonst nichts."""
+- Gib nur den umgeschriebenen Absatz aus, sonst nichts, auch keine Überschrift und keinen Kommentar."""
 
 EXAMPLES_INTRO = """
-Die folgenden Auszüge haben echte Menschen geschrieben. Sie zeigen, wie menschliches Deutsch klingt:
-wie die Satzlängen wechseln, wo ein Satz abbricht, wann ein Gedanke springt, wie der Ton schwankt.
+Der folgende Absatz stammt von einem echten Menschen, der Bauplan ist ihm abgeschaut. Er zeigt, wie menschliches
+Deutsch klingt: wie die Satzlängen wechseln, wo ein Satz abbricht, wann ein Gedanke springt, wie der Ton schwankt.
 Übernimm Rhythmus und Ton. Übernimm NIE Inhalte, Themen, Namen, Bilder oder Formulierungen daraus.
 Manche Beispiele sind über hundert Jahre alt: Nimm daraus nur den Satzbau, keine veralteten Wörter,
 keine alte Rechtschreibung. Der Inhalt kommt nur aus dem Text, den du umschreibst."""
@@ -398,32 +392,8 @@ def load_texts(folder: str) -> list[str]:
     return texts
 
 
-def excerpt(text: str, words: int) -> str:
-    """Anfang eines Texts mit höchstens so vielen Wörtern, nach Möglichkeit an einem Satzende abgeschnitten."""
-    if len(text.split()) <= words:
-        return text
-    cut = " ".join(text.split(" ")[:words])
-    while len(cut.split()) > words:
-        cut = cut.rsplit(" ", 1)[0]
-    end = max(cut.rfind(c) for c in ".!?…")
-    return cut[:end + 1] if end > len(cut) // 2 else cut + " …"
 
 
-def pick_examples(pools: list[list[str]], budget: int = EXAMPLE_BUDGET, count: int = EXAMPLE_COUNT,
-                  rng: random.Random | None = None) -> list[str]:
-    """Wählt zufällig bis zu count Texte, die meisten aus dem ersten Pool, je einen aus den weiteren.
-
-    Die Auszüge werden so gekürzt, dass sie zusammen höchstens budget Wörter haben.
-    """
-    rng = rng or random
-    pools = [p for p in pools if p]
-    if not pools or budget <= 0:
-        return []
-    extra = [rng.choice(p) for p in pools[1:count]]
-    main = pools[0]
-    chosen = rng.sample(main, min(count - len(extra), len(main))) + extra
-    share = budget // len(chosen)
-    return [excerpt(t, share) for t in chosen]
 
 
 _bundled: dict[str, list[str]] = {}
@@ -436,16 +406,6 @@ def bundled_texts(group: str) -> list[str]:
     return _bundled[group]
 
 
-def style_examples(source: str, style: str, own: list[str], bundled=bundled_texts) -> tuple[list[str], str]:
-    """Liefert die Auszüge für die gewählte Stilvorlage und einen Hinweis, falls auf etwas anderes ausgewichen wurde."""
-    if source == "Aus":
-        return [], ""
-    if source == "Meine Texte" and own:
-        return pick_examples([own]), ""
-    pools = [bundled(g) for g in STYLE_GROUPS[style]]
-    note = "Im Ordner \"Meine Texte\" liegt noch nichts, ich habe die mitgelieferten Texte genommen." \
-        if source == "Meine Texte" else ""
-    return pick_examples(pools), note
 
 
 def system_prompt(style: str, examples: list[str]) -> str:
@@ -455,15 +415,8 @@ def system_prompt(style: str, examples: list[str]) -> str:
     return prompt
 
 
-def length_target(text: str) -> tuple[int, int]:
-    words = len(text.split())
-    return round(words * 0.9), round(words * 1.15)
 
 
-def rewrite_request(text: str) -> str:
-    low, high = length_target(text)
-    return (f"Der Text hat {len(text.split())} Wörter. Deine Fassung hat {low} bis {high} Wörter.\n\n"
-            f"Schreib um:\n\n{text}")
 
 
 def _chat(model: str, url: str, messages: list[dict]) -> str:
@@ -476,18 +429,8 @@ def _chat(model: str, url: str, messages: list[dict]) -> str:
     return reply["message"]["content"].strip()
 
 
-def humanize(text: str, style: str, model: str, url: str = OLLAMA_URL, examples: list[str] | None = None) -> str:
-    return _chat(model, url, [{"role": "system", "content": system_prompt(style, examples or [])},
-                              {"role": "user", "content": rewrite_request(text)}])
 
 
-def badness(source: str, result: str) -> int:
-    """Wie weit eine Fassung danebenliegt. Erfundenes und Fehlendes wiegt am schwersten, Stil am wenigsten."""
-    lengths = [len(s.split()) for s in sentences(result)]
-    uniform = len(lengths) >= 6 and burstiness(result) < 0.45
-    return 25 * len(missing_facts(source, result)) + 25 * len(added_facts(source, result)) \
-        + 30 * len(dropped_paragraphs(source, result)) + max(0, shrinkage(source, result) - 15) + 20 * uniform \
-        + 5 * tell_count(result) + 5 * len(crutches(result))
 
 
 def crutches(result: str) -> list[str]:
@@ -503,31 +446,160 @@ def crutches(result: str) -> list[str]:
     return found
 
 
-def problems(source: str, result: str) -> list[str]:
-    """Was an einer Fassung noch nicht stimmt, als Anweisung für einen weiteren Durchgang. Leer heißt: passt."""
+
+
+CITATION = re.compile(r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)", re.I)
+
+
+def missing_citations(source: str, result: str) -> list[str]:
+    """Quellenangaben wie "(vgl. Berger 2021, S. 45)", die nicht mehr Zeichen für Zeichen in der Ausgabe stehen."""
+    return [c for c in dict.fromkeys(CITATION.findall(source)) if c not in result]
+
+
+def doubled_citations(source: str, result: str) -> list[str]:
+    """Quellenangaben, die in der Ausgabe öfter stehen als im Original."""
+    return [c for c in dict.fromkeys(CITATION.findall(result)) if result.count(c) > source.count(c)]
+
+
+def unchanged_sentences(source: str, result: str, threshold: float = 0.8) -> list[str]:
+    """Sätze der Ausgabe, die fast wörtlich aus dem Original stammen, also gar nicht umgeschrieben wurden."""
+    originals = sentences(source)
+    return [s for s in sentences(result)
+            if originals and max(difflib.SequenceMatcher(None, s, o).ratio() for o in originals) >= threshold]
+
+
+# --- Absatz für Absatz nach Satzbau-Schablone -----------------------------------------------------------------
+
+def paragraph_pool(texts: list[str]) -> list[tuple[int, list[int], str]]:
+    """Alle Absätze echter Texte als (Wortzahl, Satzlängen, Absatz), soweit sie als Bauplan taugen."""
+    pool = []
+    for text in texts:
+        for p in paragraphs(text):
+            lengths = [len(s.split()) for s in sentences(p)]
+            if 2 <= len(lengths) <= 9 and all(1 <= n <= 70 for n in lengths):
+                pool.append((sum(lengths), lengths, p))
+    return pool
+
+
+_pools: dict[str, list] = {}
+
+
+def group_pool(group: str) -> list[tuple[int, list[int], str]]:
+    if group not in _pools:
+        _pools[group] = paragraph_pool(bundled_texts(group))
+    return _pools[group]
+
+
+def plan_pool(source: str, style: str, own: list[str], pool_of=group_pool) -> tuple[list, str]:
+    """Woher die Baupläne kommen: eigene Texte, mitgelieferte passend zum Stil, oder gar keine."""
+    if source == "Aus":
+        return [], ""
+    if source == "Meine Texte" and own:
+        return paragraph_pool(own), ""
+    pool = [entry for group in STYLE_GROUPS[style] for entry in pool_of(group)]
+    note = "Im Ordner \"Meine Texte\" liegt noch nichts, ich habe die mitgelieferten Texte genommen." \
+        if source == "Meine Texte" else ""
+    return pool, note
+
+
+def fallback_plan(words: int) -> list[int]:
+    """Bauplan ohne Vorbild: lang, kurz, mittel, sehr lang, kurz … bis die Wortzahl erreicht ist."""
+    shape, plan = [1.7, 0.6, 1.0, 2.1, 0.8, 1.3], []
+    unit = max(words / 7, 4)
+    while sum(plan) < words * 0.9:
+        plan.append(max(3, round(shape[len(plan) % len(shape)] * unit)))
+    return plan
+
+
+def sentence_plan(paragraph: str, pool: list, rng: random.Random | None = None) -> tuple[list[int], str]:
+    """Abfolge von Satzlängen für einen Absatz, abgenommen von einem echten Absatz ähnlicher Länge.
+
+    Die Längen werden auf die Wortzahl des Originalabsatzes skaliert. Zurück kommen Bauplan und Vorbild-Absatz,
+    ohne passendes Vorbild ein fester abwechslungsreicher Plan und kein Vorbild.
+    """
+    rng = rng or random
+    words, count = len(paragraph.split()), len(sentences(paragraph))
+    candidates = [c for c in pool if 0.75 * words <= c[0] <= 1.25 * words and abs(len(c[1]) - count) <= 2]
+    rng.shuffle(candidates)
+    for total, lengths, example in candidates[:60]:
+        plan = [max(3, round(n * words / total)) for n in lengths]
+        if usable_plan(plan):
+            return plan, example
+    return fallback_plan(words), ""
+
+
+def usable_plan(plan: list[int]) -> bool:
+    """Abwechslungsreich, aber kein Extrem: 4 bis 45 Wörter pro Satz, höchstens ein sehr kurzer."""
+    return (len(plan) >= 2 and all(3 <= n <= 45 for n in plan) and sum(n < 6 for n in plan) <= 1
+            and burstiness(" ".join("x " * (n - 1) + "x." for n in plan)) >= 0.35)
+
+
+def plan_fit(plan: list[int], result: str) -> float:
+    """Mittlere relative Abweichung der Satzlängen vom Bauplan, 0 heißt genau getroffen."""
+    lengths = [len(s.split()) for s in sentences(result)]
+    if not lengths:
+        return 1.0
+    pairs = list(zip(plan, lengths))
+    missing = abs(len(plan) - len(lengths))
+    return (sum(abs(a - b) / a for a, b in pairs) + missing) / max(len(plan), len(lengths))
+
+
+HABITS = [
+    (re.compile(r"\bstell(?:t|en|te)\b[^.!?]{0,80}\bdar\b"), '"… stellt … dar"'),
+    (re.compile(r"\b(?:ist|sind) von (?:\w+ ){0,2}Bedeutung\b"), '"ist von … Bedeutung"'),
+    (re.compile(r"\bspiel(?:t|en)\b[^.!?]{0,50}\bRolle\b"), '"spielt eine … Rolle"'),
+    (re.compile(r"\bsomit\b"), '"somit"'),
+    (re.compile(r"\bzentrale[nrs]? (?:Aspekt|Punkt|Faktor)"), '"zentraler Aspekt/Punkt"'),
+    (re.compile(r"\bwesentliche[nrs]? (?:Aspekt|Punkt|Faktor|Anforderung)"), '"wesentlicher Aspekt"'),
+]
+
+
+def habits(text: str) -> list[str]:
+    """Wendungen in einem Absatz, die sich über den Text hinweg nicht wiederholen dürfen."""
+    return [name for pattern, name in HABITS if pattern.search(text)]
+
+
+def paragraph_request(paragraph: str, plan: list[int], avoid: list[str] | None = None) -> str:
+    facts = list(dict.fromkeys(CITATION.findall(paragraph) + FACT.findall(paragraph)))
+    lines = "\n".join(f"Satz {i}: etwa {n} Wörter" for i, n in enumerate(plan, start=1))
+    return (f"Schreib diesen Absatz um.\n\nBauplan: genau {len(plan)} Sätze.\n{lines}\n\n"
+            "So kommst du auf den Bauplan: Sätze zusammenlegen (mit \"obwohl\", \"während\", \"sodass\", "
+            "\"wodurch\" oder Relativsätzen), lange Sätze teilen, die Reihenfolge der Aussagen im Absatz ändern, "
+            "ein anderes Subjekt wählen, aktiv statt passiv. Kein Satz darf so bleiben, wie er in der Vorlage steht.\n"
+            + ("Diese Angaben müssen wörtlich vorkommen, Zahlen als Ziffern wie in der Vorlage: "
+               + "; ".join(facts) + "\n" if facts else "")
+            + ("Diese Wendungen stehen schon in früheren Absätzen, verwende sie hier nicht: " + ", ".join(avoid) + "\n"
+               if avoid else "")
+            + "Füge nichts hinzu, was nicht im Absatz steht.\n\n"
+            f"Absatz:\n{paragraph}")
+
+
+def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[str] | None = None) -> list[str]:
     found = []
+    repeated = [h for h in habits(result) if h in (avoid or [])]
+    if repeated:
+        found.append("Diese Wendungen stehen schon in früheren Absätzen, formuliere hier anders: " + ", ".join(repeated) + ".")
     added = added_facts(source, result)
     if added:
-        found.append("Diese Angaben stehen nicht in der Vorlage und müssen raus: " + ", ".join(added) +
-                     ". Streich auch die Sätze, die nur ihretwegen da sind.")
-    gone = missing_facts(source, result)
+        found.append("Diese Angaben stehen nicht in der Vorlage und müssen raus: " + ", ".join(added) + ".")
+    gone = missing_facts(source, result) + missing_citations(source, result)
     if gone:
-        found.append("Diese Angaben aus der Vorlage fehlen und müssen genau so wieder rein: " + ", ".join(gone) + ".")
-    for start in dropped_paragraphs(source, result):
-        found.append(f'Der Absatz, der mit "{start}" beginnt, fehlt inhaltlich. Seine Aussage muss rein.')
-    shorter = shrinkage(source, result)
-    if shorter > 15:
-        low, high = length_target(source)
-        found.append(f"Deine Fassung hat nur {len(result.split())} Wörter, die Vorlage {len(source.split())}. "
-                     f"Schreib {low} bis {high} Wörter. Füge dafür nichts hinzu, was nicht in der Vorlage steht, "
-                     "keine neuen Fakten, Beispiele, Ursachen oder Folgen. Werde länger, indem du die Aussagen der "
-                     "Vorlage vollständiger ausformulierst und miteinander verbindest.")
-    lengths = [len(s.split()) for s in sentences(result)]
-    if len(lengths) >= 6 and (burstiness(result) < 0.45 or sum(n >= 25 for n in lengths) < len(lengths) / 6):
-        typical = sorted(lengths)[len(lengths) // 2]
-        found.append(f"Deine Sätze sind zu gleich lang ({min(lengths)} bis {max(lengths)} Wörter, die meisten um "
-                     f"die {typical}). Mindestens jeder vierte Satz braucht 25 Wörter oder mehr, und dazwischen "
-                     "gehören einzelne sehr kurze mit höchstens 7 Wörtern.")
+        found.append("Diese Angaben fehlen und müssen wörtlich rein: " + "; ".join(gone) + ".")
+    doubled = doubled_citations(source, result)
+    if doubled:
+        found.append("Diese Quellenangabe steht jetzt öfter als in der Vorlage, sie gehört nur einmal hin: " +
+                     "; ".join(doubled) + ".")
+    words, target = len(result.split()), len(source.split())
+    if not 0.8 * target <= words <= 1.2 * target:
+        found.append(f"Der Absatz hat {words} Wörter, er soll etwa {target} haben. Nichts hinzuerfinden, nichts weglassen.")
+    if plan_fit(plan, result) > 0.4:
+        got = [len(s.split()) for s in sentences(result)]
+        found.append(f"Deine Sätze haben {', '.join(map(str, got))} Wörter. Der Bauplan verlangt {len(plan)} Sätze "
+                     f"mit {', '.join(map(str, plan))} Wörtern. Halte dich an den Bauplan.")
+    same = unchanged_sentences(source, result)
+    if same:
+        found.append("Diese Sätze hast du fast wörtlich übernommen, bau sie um: " +
+                     " / ".join(f'"{s[:60]}…"' for s in same) + ".")
     left = [t for t in AI_TELLS if t in result.lower()]
     if left:
         found.append("Diese Floskeln stehen noch drin: " + ", ".join(left) + ". Formuliere sie konkret.")
@@ -536,49 +608,92 @@ def problems(source: str, result: str) -> list[str]:
     return found
 
 
-def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL,
-                     examples: list[str] | None = None, corrections: int = 2) -> tuple[str, int]:
-    """Schreibt um und bessert bis zu corrections-mal nach, solange problems() etwas findet.
+def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str] | None = None) -> float:
+    words, target = len(result.split()), len(source.split())
+    repeated = len([h for h in habits(result) if h in (avoid or [])])
+    off = max(0.0, abs(words - target) / max(target, 1) - 0.2) * 100
+    return (25 * (len(missing_facts(source, result)) + len(added_facts(source, result))
+                  + len(missing_citations(source, result)) + len(doubled_citations(source, result)))
+            + off + 15 * min(plan_fit(plan, result), 1.0) + 8 * len(unchanged_sentences(source, result))
+            + 5 * tell_count(result) + 5 * len(crutches(result)) + 5 * repeated)
 
-    Jede Nachbesserung baut auf der letzten Fassung auf. Zurück kommt die beste aller Fassungen nach badness()
-    und wie viele Durchgänge es insgesamt waren.
+
+def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 2,
+                      rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int]:
+    """Schreibt einen Absatz nach Bauplan um und wiederholt bis zu retries-mal mit konkreter Rückmeldung.
+
+    Zurück kommt die beste Fassung und wie viele Nachbesserungen es gebraucht hat.
     """
-    messages = [{"role": "system", "content": system_prompt(style, examples or [])},
-                {"role": "user", "content": rewrite_request(text)}]
+    plan, example = sentence_plan(paragraph, pool, rng)
+    messages = [{"role": "system", "content": system_prompt(style, [example] if example else [])},
+                {"role": "user", "content": paragraph_request(paragraph, plan, avoid)}]
     current = _chat(model, url, messages)
-    best, best_score, passes = current, badness(text, current), 1
-    for _ in range(corrections):
-        issues = problems(text, current)
+    best, best_score, extra = current, paragraph_badness(paragraph, current, plan, avoid), 0
+    for _ in range(retries):
+        issues = paragraph_problems(paragraph, current, plan, avoid)
         if not issues:
             break
         current = _chat(model, url, messages + [
             {"role": "assistant", "content": current},
             {"role": "user", "content": "Das passt noch nicht:\n- " + "\n- ".join(issues) +
-             "\n\nGib nur die verbesserte Fassung aus."}])
-        passes += 1
-        if badness(text, current) <= best_score:
-            best, best_score = current, badness(text, current)
-    return best, passes
+             "\n\nGib nur den verbesserten Absatz aus."}])
+        extra += 1
+        score = paragraph_badness(paragraph, current, plan, avoid)
+        if score <= best_score:
+            best, best_score = current, score
+    return best, extra
+
+
+def needs_rewrite(paragraph: str) -> bool:
+    """Überschriften und Einzeiler bleiben, wie sie sind."""
+    return len(paragraph.split()) >= 12 and len(sentences(paragraph)) >= 2
+
+
+def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, pool: list | None = None,
+                     retries: int = 2, progress=lambda done, total: None,
+                     rng: random.Random | None = None) -> tuple[str, int]:
+    """Schreibt den Text Absatz für Absatz um. Zurück kommen der Text und 1 plus die Zahl der Nachbesserungen."""
+    paras = paragraphs(text)
+    todo = [i for i, p in enumerate(paras) if needs_rewrite(p)]
+    out, extra, used = list(paras), 0, []
+    for step, i in enumerate(todo, start=1):
+        progress(step, len(todo))
+        out[i], more = rewrite_paragraph(paras[i], style, model, url, pool or [], retries, rng, used)
+        extra += more
+        used += [h for h in habits(out[i]) if h not in used]
+    return "\n\n".join(out), 1 + extra
 
 
 FACT = re.compile(r"\d+(?:[.,:/-]\d+)*")
 
 
+NUMBER_WORDS = dict(zip(map(str, range(2, 13)), "zwei drei vier fünf sechs sieben acht neun zehn elf zwölf".split()))
+
+
 def missing_facts(source: str, result: str) -> list[str]:
-    """Zahlen und Daten aus dem Original, die in der Ausgabe nicht mehr vorkommen."""
+    """Zahlen und Daten aus dem Original, die in der Ausgabe nicht mehr vorkommen.
+
+    Eine ausgeschriebene kleine Zahl ("zwei" statt "2") zählt als vorhanden, sonst verlangt die Nachbesserung
+    eine Zahl, die längst dasteht, und das Modell dichtet einen Satz dazu, nur um sie unterzubringen.
+    """
     have = set(FACT.findall(result))
     missing = []
     for fact in FACT.findall(source):
-        if fact not in have and fact not in missing:
+        spelled = fact in NUMBER_WORDS and re.search(r"\b%s\b" % NUMBER_WORDS[fact], result, re.I)
+        if fact not in have and not spelled and fact not in missing:
             missing.append(fact)
     return missing
 
 
 def added_facts(source: str, result: str) -> list[str]:
-    """Zahlen und Daten in der Ausgabe, die das Original nicht enthält, also vom Modell erfunden sind."""
-    have = set(FACT.findall(source))
+    """Zahlen und Daten in der Ausgabe, die das Original nicht enthält, also vom Modell erfunden sind.
+
+    Zahlen aus Quellenangaben zählen nur dort: Macht das Modell aus "(vgl. Berger 2021)" ein "seit 2021" im Fließtext,
+    ist das eine erfundene Aussage.
+    """
+    have = set(FACT.findall(CITATION.sub(" ", source)))
     added = []
-    for fact in FACT.findall(result):
+    for fact in FACT.findall(CITATION.sub(" ", result)):
         if fact not in have and fact not in added:
             added.append(fact)
     return added
@@ -588,24 +703,6 @@ def paragraphs(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
 
-def dropped_paragraphs(source: str, result: str) -> list[str]:
-    """Absätze des Originals, deren eigene Begriffe in der Ausgabe fast alle fehlen. Liefert ihre Anfänge.
-
-    Gezählt werden nur großgeschriebene Wörter, die in keinem anderen Absatz vorkommen, verglichen über die ersten
-    sechs Buchstaben, damit "Veranstalter" und "Veranstaltungen" nicht als verschieden zählen.
-    """
-    paras = paragraphs(source)
-    if len(paras) < 2:
-        return []
-    stem = lambda w: w.lower()[:6]
-    nouns = [{stem(w) for w in re.findall(r"\b[A-ZÄÖÜ][a-zäöüß]{4,}", p)} for p in paras]
-    kept = {stem(w) for w in re.findall(r"\w{5,}", result)}
-    dropped = []
-    for i, p in enumerate(paras):
-        own = nouns[i] - set().union(*(n for j, n in enumerate(nouns) if j != i))
-        if len(own) >= 3 and len(own & kept) / len(own) < 0.34:
-            dropped.append(" ".join(p.split()[:5]) + " …")
-    return dropped
 
 
 def shrinkage(source: str, result: str) -> int:
@@ -622,11 +719,12 @@ def warnings(source: str, result: str) -> str:
     added = added_facts(source, result)
     if added:
         parts.append("neu, steht nicht im Original: " + ", ".join(added))
-    for start in dropped_paragraphs(source, result):
-        parts.append(f'Absatz fehlt: "{start}"')
     shorter = shrinkage(source, result)
     if shorter > 20:
         parts.append(f"Ausgabe ist {shorter} % kürzer als das Original")
+    same = unchanged_sentences(source, result)
+    if len(same) > 1:
+        parts.append(f"{len(same)} Sätze kaum verändert")
     return ("Achtung: " + "  ·  ".join(parts) + ". Gegenlesen oder noch einmal umschreiben.") if parts else ""
 
 
@@ -1114,21 +1212,31 @@ class App:
 
         def work() -> None:
             start = time.time()
-            examples, note = style_examples(source, style, load_texts(user_dir()) if source == "Meine Texte" else [])
+            pool, note = plan_pool(source, style, load_texts(user_dir()) if source == "Meine Texte" else [])
             try:
-                result, passes = humanize_checked(text, style, model, self.url, examples)
+                result, passes = humanize_checked(
+                    text, style, model, self.url, pool,
+                    progress=lambda done, total: self.events.put(("progress", (done, total))))
                 self.events.put(("result", (text, result, time.time() - start, note, passes)))
             except OllamaError as e:
                 self.events.put(("error", str(e)))
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _on_progress(self, value: tuple[int, int]) -> None:
+        done, total = value
+        self.status.config(text=f"Schreibe um … Absatz {done} von {total}", fg=MUTED)
+
     def copy_output(self) -> None:
         text = self.output.get("1.0", "end").strip()
         if text:
             self.root.clipboard_clear()
             self.root.clipboard_append(text)
+            # Nur kurz anzeigen, damit Zeit und Werte des letzten Durchgangs danach wieder lesbar sind.
+            before, color = self.status["text"], self.status["fg"]
             self.status.config(text="Ausgabe kopiert.", fg=MUTED)
+            self.root.after(1500, lambda: self.status["text"] == "Ausgabe kopiert." and
+                            self.status.config(text=before, fg=color))
 
 
 def selftest(target: str) -> None:

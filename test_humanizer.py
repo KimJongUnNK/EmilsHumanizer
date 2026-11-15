@@ -90,6 +90,10 @@ def fake_ollama():
     server.shutdown()
 
 
+LONG = ("Das Festival beginnt am Abend mit einem kurzen Konzert. Danach spielen mehrere Bands bis tief in die Nacht, "
+        "während das Publikum tanzt.")
+
+
 def test_saetze_und_kennzahlen():
     assert len(h.sentences("Das gilt z. B. für Kaffee bzw. Tee. Am 28.09.2026 geht es los.")) == 2
     assert h.burstiness("Nur ein Satz.") == 0.0
@@ -113,7 +117,8 @@ def test_list_models_sortiert(fake_ollama):
 
 def test_humanize_anfrage(fake_ollama):
     url, seen, _ = fake_ollama
-    assert h.humanize("Text", "Locker", "gemma3:12b", url).startswith("Kurz.")
+    messages = [{"role": "system", "content": h.system_prompt("Locker", [])}, {"role": "user", "content": "Text"}]
+    assert h._chat("gemma3:12b", url, messages).startswith("Kurz.")
     path, body = seen[-1]
     assert path == "/api/chat" and body["stream"] is False
     assert body["options"]["num_ctx"] == h.OLLAMA_CONTEXT
@@ -220,7 +225,7 @@ def test_katalog_und_speicher():
 def test_fehler_von_ollama(fake_ollama):
     url, _, _ = fake_ollama
     with pytest.raises(h.OllamaError, match="500"):
-        h.humanize("Text", "Locker", "kaputt", url)
+        h._chat("kaputt", url, [{"role": "user", "content": "Text"}])
 
 
 def test_nicht_erreichbar():
@@ -253,7 +258,7 @@ def test_app_laedt_modelle_und_schreibt_um(root, fake_ollama):
     assert list(app.model["values"]) == ["gemma3:12b", "llama3.2:3b"]
     assert app.model.get() == "gemma3:12b"
 
-    app.input.insert("1.0", "Darüber hinaus ist das wichtig. Es ist nahtlos.")
+    app.input.insert("1.0", "Darüber hinaus ist das wichtig für alle Leute im Team. Es ist nahtlos und gut so für uns.")
     app.run()
     assert str(app.go["state"]) == "disabled"
     pump(root, lambda: app.output.get("1.0", "end").strip() != "")
@@ -283,7 +288,7 @@ def test_app_zeigt_fehler_und_bleibt_bedienbar(root, fake_ollama):
     app = h.App(root, url)
     pump(root, lambda: str(app.go["state"]) == "normal")
     app.model.set("kaputt")
-    app.input.insert("1.0", "Text")
+    app.input.insert("1.0", LONG)
     app.run()
     pump(root, lambda: "500" in app.status["text"])
     assert str(app.go["state"]) == "normal"
@@ -467,51 +472,12 @@ def test_load_texts(tmp_path):
     assert h.load_texts(str(tmp_path / "fehlt")) == []
 
 
-def test_excerpt_schneidet_am_satzende():
-    text = "Eins zwei drei. Vier fünf sechs sieben. Acht neun zehn elf zwölf."
-    assert h.excerpt(text, 100) == text
-    assert h.excerpt(text, 9) == "Eins zwei drei. Vier fünf sechs sieben."
-    assert h.excerpt("ein langer satz ohne punkt und ende", 3) == "ein langer satz …"
-
-
-def test_pick_examples_budget_und_pools():
-    rng = random.Random(1)
-    main = [" ".join(["haupt"] * 1000) + f" {i}" for i in range(10)]
-    side = ["neben " * 50]
-    picked = h.pick_examples([main, side], budget=600, count=3, rng=rng)
-    assert len(picked) == 3
-    assert sum(len(p.split()) for p in picked) <= 600 + 3
-    assert sum(p.startswith("haupt") for p in picked) == 2 and sum(p.startswith("neben") for p in picked) == 1
-    assert h.pick_examples([[], []]) == []
-    assert len(h.pick_examples([["nur einer"]], count=3)) == 1
-
-
-def test_style_examples_quellen():
-    groups = {"sachlich": ["Sachtext."], "bericht": ["Bericht."], "locker": ["Locker."]}
-    bundled = groups.__getitem__
-    assert h.style_examples("Aus", "Akademisch", ["Eigen."], bundled) == ([], "")
-    examples, note = h.style_examples("Meine Texte", "Akademisch", ["Eigen."], bundled)
-    assert examples == ["Eigen."] and note == ""
-    examples, note = h.style_examples("Meine Texte", "Akademisch", [], bundled)
-    assert set(examples) == {"Sachtext.", "Bericht."} and "noch nichts" in note
-    examples, _ = h.style_examples("Mitgeliefert", "Locker", ["Eigen."], bundled)
-    assert set(examples) == {"Locker.", "Bericht."}
-    assert set(h.style_examples("Mitgeliefert", "Natürlich", [], bundled)[0]) == {"Bericht.", "Locker.", "Sachtext."}
-
-
 def test_system_prompt_mit_und_ohne_vorlage():
     plain = h.system_prompt("Akademisch", [])
     assert "<beispiel>" not in plain and h.STYLES["Akademisch"] in plain
     with_examples = h.system_prompt("Akademisch", ["Ein echter Satz."])
     assert "<beispiel>\nEin echter Satz.\n</beispiel>" in with_examples
     assert "NIE Inhalte" in with_examples
-
-
-def test_humanize_schickt_vorlage(fake_ollama):
-    url, seen, _ = fake_ollama
-    h.humanize("Text", "Locker", "gemma3:12b", url, ["Vorbild."])
-    assert "<beispiel>\nVorbild.\n</beispiel>" in seen[-1][1]["messages"][0]["content"]
-    assert seen[-1][1]["options"]["num_ctx"] == 16384
 
 
 def test_missing_facts_und_kuerzung():
@@ -549,7 +515,7 @@ def test_app_warnung_bei_fehlendem_datum(root, fake_ollama, monkeypatch):
     app = h.App(root, url)
     pump(root, lambda: str(app.go["state"]) == "normal")
     assert app.source.get() == "Mitgeliefert"
-    app.input.insert("1.0", "Das Fest ist am 28.09.2026 in Dornbirn mit 300 Gästen.")
+    app.input.insert("1.0", "Das Fest ist am 28.09.2026 in Dornbirn mit 300 Gästen. Alle kamen pünktlich und blieben lange.")
     app.run()
     pump(root, lambda: app.warning["text"] != "")
     assert "28.09.2026" in app.warning["text"] and "300" in app.warning["text"]
@@ -565,7 +531,7 @@ def test_app_meine_texte_leer_gibt_hinweis(root, fake_ollama, monkeypatch, tmp_p
     app = h.App(root, url)
     pump(root, lambda: str(app.go["state"]) == "normal")
     app.source.set("Meine Texte")
-    app.input.insert("1.0", "Kurz. Und dann ein deutlich längerer Satz hinterher.")
+    app.input.insert("1.0", LONG)
     app.run()
     pump(root, lambda: "noch nichts" in app.warning["text"])
     assert "<beispiel>" in seen[-1][1]["messages"][0]["content"]
@@ -575,15 +541,17 @@ def test_app_meine_texte_leer_gibt_hinweis(root, fake_ollama, monkeypatch, tmp_p
 
 def test_app_waehlt_meine_texte_wenn_vorhanden(root, fake_ollama, monkeypatch, tmp_path):
     url, seen, _ = fake_ollama
-    (tmp_path / "hausarbeit.txt").write_text("Mein eigener Satz aus der Hausarbeit.", encoding="utf-8")
+    own = ("Kurz gesagt: so nicht. Der zweite Satz dagegen erklärt ausführlich und mit Nebensätzen, worum es in "
+           "dieser Hausarbeit eigentlich gehen soll.")
+    (tmp_path / "hausarbeit.txt").write_text(own, encoding="utf-8")
     monkeypatch.setattr(h, "user_dir", lambda: str(tmp_path))
     app = h.App(root, url)
     assert app.source.get() == "Meine Texte"
     pump(root, lambda: str(app.go["state"]) == "normal")
-    app.input.insert("1.0", "Text")
+    app.input.insert("1.0", LONG)
     app.run()
     pump(root, lambda: seen[-1][0] == "/api/chat")
-    assert "Mein eigener Satz aus der Hausarbeit." in seen[-1][1]["messages"][0]["content"]
+    assert own in seen[-1][1]["messages"][0]["content"]
 
 
 # --- Ziel-Länge und automatisches Nachbessern ---
@@ -603,20 +571,6 @@ VARIED = (
 def test_quellenangaben_trennen_keinen_satz():
     text = "Besucher erwarten Planung (vgl. Berger 2021, S. 45). Die Anforderungen steigen. Siehe Kap. 3 und Abs. 2."
     assert len(h.sentences(text)) == 3
-
-
-def test_rewrite_request_nennt_ziel_laenge():
-    request = h.rewrite_request(" ".join(["wort"] * 100))
-    assert "hat 100 Wörter" in request and "90 bis 115 Wörter" in request
-
-
-def test_problems():
-    assert h.problems(VARIED, VARIED) == []
-    found = h.problems(UNIFORM + " " + UNIFORM + " Am 24.07.2010 war es so.", UNIFORM)
-    assert any("nur" in f and "Wörter" in f for f in found)
-    assert any("24.07.2010" in f for f in found)
-    assert any("gleich lang" in f for f in found)
-    assert any("spielt eine" in f for f in h.problems(VARIED, VARIED + " Das spielt eine Rolle."))
 
 
 @pytest.fixture
@@ -640,50 +594,18 @@ def scripted_ollama():
     server.shutdown()
 
 
-def test_humanize_checked_passt_gleich(scripted_ollama):
-    url, replies, seen = scripted_ollama
-    replies.append(VARIED)
-    assert h.humanize_checked(VARIED, "Akademisch", "m", url) == (VARIED.strip(), 1)
-    assert len(seen) == 1 and "Wörter. Deine Fassung hat" in seen[0]["messages"][1]["content"]
-
-
-def test_humanize_checked_bessert_nach(scripted_ollama):
-    url, replies, seen = scripted_ollama
-    replies += [UNIFORM[:150], VARIED]
-    result, passes = h.humanize_checked(VARIED, "Akademisch", "m", url)
-    assert passes == 2 and result == VARIED.strip()
-    follow_up = seen[1]["messages"]
-    assert [m["role"] for m in follow_up] == ["system", "user", "assistant", "user"]
-    assert follow_up[2]["content"] == UNIFORM[:150].strip() and "passt noch nicht" in follow_up[3]["content"]
-
-
-def test_humanize_checked_behaelt_erste_wenn_zweite_schlechter(scripted_ollama):
-    url, replies, _ = scripted_ollama
-    first = VARIED[:len(VARIED) // 2]
-    replies += [first, "Kaputt.", "Auch kaputt."]
-    result, passes = h.humanize_checked(VARIED + " Am 24.07.2010.", "Akademisch", "m", url)
-    assert passes == 3 and result == first.strip()
-
-
 def test_app_zeigt_nachgebessert(root, scripted_ollama, monkeypatch):
     url, replies, _ = scripted_ollama
     monkeypatch.setattr(h, "ensure_ollama", lambda url: ["m"])
     monkeypatch.setattr(h, "user_dir", lambda: "/gibt/es/nicht")
-    replies += [UNIFORM[:150], VARIED]
+    replies += [UNIFORM[:150], VARIED, VARIED]
     app = h.App(root, url)
     pump(root, lambda: str(app.go["state"]) == "normal")
     app.input.insert("1.0", VARIED)
     app.run()
     pump(root, lambda: "Fertig" in app.status["text"])
-    assert "(1× nachgebessert)" in app.status["text"]
+    assert "× nachgebessert)" in app.status["text"]
     assert app.update_button.master is app.go.master
-
-
-def test_badness_ordnet_fassungen():
-    source = VARIED + " Am 24.07.2010."
-    assert h.badness(source, source) == 0
-    assert h.badness(source, VARIED) == 25
-    assert h.badness(source, "Kaputt.") > h.badness(source, VARIED[:len(VARIED) // 2] + " Am 24.07.2010.")
 
 
 def test_app_merkt_sich_auswahl(root, fake_ollama, monkeypatch, tmp_path):
@@ -711,14 +633,6 @@ def test_einstellungen_kaputt_oder_fremd(tmp_path, monkeypatch):
     assert h.load_settings() == {}
 
 
-def test_humanize_checked_hoert_nach_zwei_korrekturen_auf(scripted_ollama):
-    url, replies, seen = scripted_ollama
-    replies += [UNIFORM[:150]] * 3
-    _, passes = h.humanize_checked(VARIED, "Akademisch", "m", url)
-    assert passes == 3 and len(seen) == 3
-    assert seen[2]["messages"][2]["content"] == UNIFORM[:150].strip()
-
-
 SOURCE = """Am 24.07.2010 kamen viele Besucher nach Duisburg. Die Planung der Fluchtwege war mangelhaft.
 
 Beim Schallschutz gilt ein Richtwert von 100 dB(A) am Mischpult. Anrainer müssen geschützt werden.
@@ -731,13 +645,6 @@ def test_added_facts():
     assert h.added_facts(SOURCE, SOURCE + " Dabei starben 21 Menschen, 21 zu viel.") == ["21"]
 
 
-def test_dropped_paragraphs():
-    assert h.dropped_paragraphs(SOURCE, SOURCE) == []
-    without_end = "\n\n".join(h.paragraphs(SOURCE)[:2])
-    assert h.dropped_paragraphs(SOURCE, without_end) == ["Abschließend zeigt sich: Nachhaltigkeit und …"]
-    assert h.dropped_paragraphs("Nur ein Absatz mit Wörtern.", "") == []
-
-
 def test_crutches():
     text = " ".join(f"Das gilt, weil es so ist. Zudem stimmt das {i}." for i in range(4))
     found = h.crutches(text)
@@ -747,9 +654,141 @@ def test_crutches():
 
 def test_problems_und_warnung_bei_erfundenem_und_fehlendem():
     result = h.paragraphs(SOURCE)[0] + " Dabei starben 21 Menschen.\n\n" + h.paragraphs(SOURCE)[1]
-    found = h.problems(SOURCE, result)
-    assert any("21" in f and "müssen raus" in f for f in found)
-    assert any("Abschließend" in f for f in found)
     warning = h.warnings(SOURCE, result)
-    assert "neu, steht nicht im Original: 21" in warning and 'Absatz fehlt: "Abschließend' in warning
-    assert h.badness(SOURCE, result) > h.badness(SOURCE, SOURCE)
+    assert "neu, steht nicht im Original: 21" in warning and "Absatz fehlt" not in warning
+
+
+
+
+# --- Absatz für Absatz nach Bauplan ---
+PARA = ("Ein zentraler Aspekt ist der Energieverbrauch der Technik. Licht und Ton verursachen bei 50.000 Gästen bis "
+        "zu 1,2 Gigawattstunden (vgl. Hofer 2019, S. 112). Mit LED sinkt der Verbrauch um etwa 60 %.")
+
+
+def test_paragraph_pool_und_quellen():
+    pool = h.paragraph_pool(["Eins zwei drei. Vier fünf sechs sieben.\n\nNur ein Satz hier.", "  "])
+    assert pool == [(7, [3, 4], "Eins zwei drei. Vier fünf sechs sieben.")]
+    groups = {"sachlich": [(5, [2, 3], "S")], "bericht": [(5, [2, 3], "B")], "locker": [(5, [2, 3], "L")]}
+    assert h.plan_pool("Aus", "Akademisch", ["x"], groups.__getitem__) == ([], "")
+    pool, note = h.plan_pool("Mitgeliefert", "Akademisch", [], groups.__getitem__)
+    assert [p[2] for p in pool] == ["S", "B"] and note == ""
+    pool, note = h.plan_pool("Meine Texte", "Locker", [], groups.__getitem__)
+    assert [p[2] for p in pool] == ["L", "B"] and "noch nichts" in note
+    own = ["Kurz und gut. Dieser zweite Satz ist deutlich länger als der erste."]
+    assert h.plan_pool("Meine Texte", "Locker", own, groups.__getitem__)[0][0][2] == own[0]
+
+
+def test_sentence_plan():
+    pool = [(36, [4, 20, 12], "Vorbild A."), (300, [100, 200], "zu lang"), (36, [12, 12, 12], "zu gleichmäßig")]
+    plan, example = h.sentence_plan(PARA, pool, random.Random(1))
+    assert example == "Vorbild A." and len(plan) == 3
+    assert abs(sum(plan) - len(PARA.split())) <= 3 and h.usable_plan(plan)
+    plan, example = h.sentence_plan(PARA, [], random.Random(1))
+    assert example == "" and plan == h.fallback_plan(len(PARA.split()))
+    assert h.usable_plan(h.fallback_plan(64))
+    assert not h.usable_plan([58, 3]) and not h.usable_plan([3, 4, 30]) and not h.usable_plan([10, 10, 10])
+
+
+def test_plan_fit():
+    assert h.plan_fit([2, 3], "Eins zwei. Drei vier fünf.") == 0
+    assert h.plan_fit([10, 10], "Eins zwei. Drei vier fünf.") > 0.4
+    assert h.plan_fit([2, 3, 4], "Eins zwei. Drei vier fünf.") > 0.3
+    assert h.plan_fit([2], "") == 1.0
+
+
+def test_paragraph_request():
+    request = h.paragraph_request(PARA, [20, 5, 12])
+    assert "genau 3 Sätze" in request and "Satz 2: etwa 5 Wörter" in request
+    assert "(vgl. Hofer 2019, S. 112)" in request and "50.000" in request and request.endswith(PARA)
+
+
+def test_missing_citations_und_unchanged():
+    assert h.missing_citations(PARA, PARA) == []
+    assert h.missing_citations(PARA, PARA.replace("S. 112", "S.112")) == ["(vgl. Hofer 2019, S. 112)"]
+    assert len(h.unchanged_sentences(PARA, PARA)) == 3
+    assert h.unchanged_sentences(PARA, "Ganz anders formuliert. Wirklich ganz anders.") == []
+    warning = h.warnings(PARA, PARA)
+    assert "3 Sätze kaum verändert" in warning
+
+
+def test_paragraph_problems():
+    plan = [12, 14, 9]
+    found = h.paragraph_problems(PARA, PARA.replace("(vgl. Hofer 2019, S. 112)", "") + " Dazu 21 Tote.", plan)
+    text = " ".join(found)
+    assert "21" in text and "(vgl. Hofer 2019, S. 112)" in text and "fast wörtlich" in text
+    assert "Bauplan" in " ".join(h.paragraph_problems(PARA, "Ein einziger Satz mit 1,2 und 50.000 und 60 und 2019 "
+                                                          "und 112 (vgl. Hofer 2019, S. 112).", plan))
+
+
+def test_needs_rewrite():
+    assert not h.needs_rewrite("Nachhaltigkeit und Sicherheit bei Großveranstaltungen")
+    assert not h.needs_rewrite("Ein einziger, recht langer Satz ohne einen zweiten danach und ohne Ende in Sicht.")
+    assert h.needs_rewrite(PARA)
+
+
+def test_rewrite_paragraph_bessert_nach_und_nimmt_beste(scripted_ollama):
+    url, replies, seen = scripted_ollama
+    good = ("Bei 50.000 Gästen verursachen Licht und Ton bis zu 1,2 Gigawattstunden (vgl. Hofer 2019, S. 112), "
+            "was den Energiebedarf zum Kernthema macht. Viel ist das. LED drückt den Bedarf um etwa 60 %.")
+    replies += ["Kaputt ohne Zahlen. Wirklich.", good, "Wieder kaputt. Ganz."]
+    pool = [(36, [17, 3, 9], "Ein echter Absatz als Vorbild.")]
+    result, extra = h.rewrite_paragraph(PARA, "Akademisch", "m", url, pool, rng=random.Random(1))
+    assert result == good and extra >= 1
+    assert "<beispiel>\nEin echter Absatz als Vorbild.\n</beispiel>" in seen[0]["messages"][0]["content"]
+    assert "Bauplan: genau 3 Sätze" in seen[0]["messages"][1]["content"]
+    assert seen[1]["messages"][2]["content"] == "Kaputt ohne Zahlen. Wirklich."
+
+
+def test_humanize_checked_absatzweise(scripted_ollama):
+    url, replies, seen = scripted_ollama
+    text = "Überschrift ohne Punkt\n\n" + PARA + "\n\n" + LONG
+    replies += ["Erster Absatz neu. Mit 50.000 und 1,2 und 60 (vgl. Hofer 2019, S. 112)."] * 3 + ["Zweiter neu. Ja."] * 3
+    steps = []
+    result, passes = h.humanize_checked(text, "Akademisch", "m", url, [], progress=lambda d, t: steps.append((d, t)))
+    parts = h.paragraphs(result)
+    assert parts[0] == "Überschrift ohne Punkt" and parts[1].startswith("Erster") and parts[2].startswith("Zweiter")
+    assert steps == [(1, 2), (2, 2)] and passes == 1 + (len(seen) - 2)
+
+
+def test_app_zeigt_fortschritt_und_kopieren_stellt_status_wieder_her(root, fake_ollama):
+    url, _, _ = fake_ollama
+    app = h.App(root, url)
+    pump(root, lambda: str(app.go["state"]) == "normal")
+    app._on_progress((2, 5))
+    assert app.status["text"] == "Schreibe um … Absatz 2 von 5"
+    app.output.insert("1.0", "Etwas")
+    app.status.config(text="Fertig in 3 s")
+    app.copy_output()
+    assert app.status["text"] == "Ausgabe kopiert."
+    pump(root, lambda: app.status["text"] == "Fertig in 3 s", timeout=5)
+
+
+def test_ausgeschriebene_zahl_zaehlt_als_vorhanden():
+    assert h.missing_facts("Maximal 2 Personen pro Quadratmeter.", "Höchstens zwei Personen je Quadratmeter.") == []
+    assert h.missing_facts("Es kamen 50.000 Gäste.", "Es kamen fünfzigtausend Gäste.") == ["50.000"]
+
+
+def test_habits_und_wiederholung_ueber_absaetze():
+    assert h.habits("Die Technik stellt einen zentralen Aspekt dar.") == ['"… stellt … dar"', '"zentraler Aspekt/Punkt"']
+    assert h.habits("Kurz und klar.") == []
+    found = h.paragraph_problems(PARA, "Das stellt viel dar. Ganz anders.", [3, 2], ['"… stellt … dar"'])
+    assert any("früheren Absätzen" in f for f in found)
+    assert "verwende sie hier nicht" in h.paragraph_request(PARA, [10, 10], ['"somit"'])
+
+
+def test_humanize_checked_gibt_gewohnheiten_weiter(scripted_ollama):
+    url, replies, seen = scripted_ollama
+    replies += ["Die Lage stellt viel dar. Sonst nichts."] * 6
+    h.humanize_checked(PARA + "\n\n" + LONG, "Akademisch", "m", url, [], retries=0)
+    assert "stellt … dar" not in seen[0]["messages"][1]["content"]
+    assert '"… stellt … dar"' in seen[1]["messages"][1]["content"]
+
+
+
+def test_jahreszahl_aus_quellenangabe_im_text_ist_erfunden():
+    source = "Die Anforderungen stiegen (vgl. Berger 2021, S. 45)."
+    assert h.added_facts(source, source) == []
+    assert h.added_facts(source, "Die Anforderungen stiegen seit 2021 (vgl. Berger 2021, S. 45).") == ["2021"]
+    doubled = "Erst (vgl. Berger 2021, S. 45), dann nochmal (vgl. Berger 2021, S. 45)."
+    assert h.doubled_citations(source, doubled) == ["(vgl. Berger 2021, S. 45)"]
+    assert any("öfter" in f for f in h.paragraph_problems(source, doubled, [3, 4]))

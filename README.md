@@ -35,7 +35,7 @@ Sehr lange Texte (grob über 2.000 Wörter) in Teilen umschreiben, sonst schneid
 
 ## Stilvorlage: echte Menschentexte
 
-Vor jedem Umschreiben bekommt das Modell drei kurze Auszüge aus Texten, die nachweislich Menschen geschrieben haben. Daran sieht es, wie menschliches Deutsch klingt: wechselnde Satzlängen, Sprünge, Ton. Inhalte übernimmt es daraus nicht. Das Modell wird dabei nicht trainiert, die Auszüge wechseln bei jedem Durchlauf.
+Die Baupläne und Hörproben stammen aus Texten, die nachweislich Menschen geschrieben haben. Daran sieht das Modell, wie menschliches Deutsch klingt: wechselnde Satzlängen, Sprünge, Ton. Inhalte übernimmt es daraus nicht. Das Modell wird dabei nicht trainiert, die Vorbilder wechseln bei jedem Absatz.
 
 Oben in der App unter **Stilvorlage**:
 
@@ -43,20 +43,24 @@ Oben in der App unter **Stilvorlage**:
 - **Meine Texte:** Eigene Texte. **Meine Texte …** öffnet den Ordner (`%APPDATA%\EmilsHumanizer\texte`), dort `.txt`-Dateien ablegen. Am besten wirken eigene frühere Arbeiten. Der Ordner liegt nur auf deinem Rechner und kommt nie ins Repo.
 - **Aus:** ohne Vorlage.
 
-## Prüfen und Nachbessern
+## Absatz für Absatz nach Bauplan
 
-Das Modell bekommt eine Ziel-Wortzahl (90 bis 115 % des Originals). Danach prüft die App die Fassung:
+Die App schreibt nicht den ganzen Text auf einmal um, sondern jeden Absatz einzeln. Überschriften und Einzeiler bleiben stehen.
 
-- fehlen Zahlen oder Daten aus dem Original, oder sind welche dazugekommen, die das Modell erfunden hat?
-- fehlt ein ganzer Absatz, etwa der Schluss?
-- ist sie mehr als 15 % kürzer?
-- sind die Sätze fast alle gleich lang, stehen noch KI-Floskeln drin, hängt sie ständig ", weil …" an?
+Für jeden Absatz sucht sie unter den Stilvorlagen einen echten, von einem Menschen geschriebenen Absatz ähnlicher Länge und übernimmt davon nur die Abfolge der Satzlängen, zum Beispiel 32, 20 und 12 Wörter. Das Modell bekommt diesen Bauplan als genaue Vorgabe, dazu den echten Absatz als Hörprobe und die Liste der Angaben, die wörtlich bleiben müssen: Zahlen, Daten, Quellenangaben wie "(vgl. Berger 2021, S. 45)". Bei Stilvorlage "Aus" nimmt die App einen festen abwechslungsreichen Bauplan.
 
-Findet sie etwas, schickt sie dem Modell eine konkrete Rückmeldung und lässt es nachbessern, höchstens zweimal. Behalten wird die beste Fassung, die Statuszeile zeigt, wie oft nachgebessert wurde. Was danach noch fehlt oder erfunden ist, steht rot unter den Textfeldern.
+Danach prüft sie jeden Absatz:
+
+- fehlen Zahlen, Daten oder Quellenangaben, sind welche dazugekommen oder steht eine Quellenangabe doppelt? Eine Jahreszahl, die nur in einer Quellenangabe stand und plötzlich im Fließtext auftaucht, gilt als erfunden.
+- wiederholen sich Wendungen wie "… stellt … dar" oder "ist von … Bedeutung" über mehrere Absätze?
+- ist der Absatz mehr als 20 % kürzer oder länger?
+- passen Satzanzahl und Satzlängen zum Bauplan?
+- sind Sätze fast wörtlich aus dem Original übernommen?
+- stehen noch KI-Floskeln drin, hängt er ständig ", weil …" an?
+
+Findet sie etwas, schickt sie dem Modell eine konkrete Rückmeldung, höchstens zweimal pro Absatz, und behält die beste Fassung. Die Statuszeile zeigt den Fortschritt ("Absatz 3 von 6") und am Ende, wie oft nachgebessert wurde. Was danach noch fehlt, erfunden oder kaum verändert ist, steht rot unter den Textfeldern.
 
 Erfundene Aussagen ohne Zahl (etwa ein dazugedichteter Grund) erkennt die Prüfung nicht. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
-
-Die mitgelieferten Texte stammen von [Wikisource](https://de.wikisource.org), wo nur gemeinfreie Texte stehen (Urheberrecht abgelaufen). Darunter Kurt Tucholsky, Franz Kafka, Ludwig Thoma und viele Artikel aus Zeitschriften wie der "Gartenlaube". Gedichte und Dramen sind aussortiert, Stellen mit rassistischen oder antisemitischen Begriffen entfernt, die Rechtschreibung ist an die heutige angepasst (daß → dass). Das Skript dafür liegt unter `werkzeuge/`.
 
 ## Update
 

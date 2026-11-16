@@ -107,7 +107,8 @@ ABBREVIATIONS = re.compile(
     r"\b(z\.\s?B|d\.\s?h|u\.\s?a|o\.\s?ä|u\.\s?U|bzw|bspw|usw|ca|Nr|vgl|etc|evtl|ggf|inkl|exkl|sog|Dr|Prof|Abb|Mio|Mrd|St|"
     r"S|Abs|Kap|Aufl|Hrsg|hrsg|Bd|Jg|Jh|Tab|ebd|Ebd|ders|f|ff|al|Std|Min|Mag|Ing|Dipl|Fa|Tel|Str|vs)\."
 )
-NUMBER_DOT = re.compile(rf"(\d)\.(?=\d|\s+[a-zäöü]|\s+(?:{MONTHS})\b)")
+ORDINAL_NOUNS = "Jahrhundert|Jahrtausend|Auflage|Klasse|Platz|Mal|Stock|Bezirk|Semester|Kapitel|Quartal|Lebensjahr"
+NUMBER_DOT = re.compile(rf"(\d)\.(?=\d|\s+[a-zäöü]|\s+(?:{MONTHS}|{ORDINAL_NOUNS})\w*\b)")
 
 BG, PANEL, FG, MUTED, ACCENT = "#141414", "#232323", "#f2f2f2", "#9a9a9a", "#ff4b4b"
 ADDED, REMOVED = "#1f4d2e", "#5a2326"
@@ -809,11 +810,13 @@ def overlap(a: str, b: str) -> float:
     return len(stems & core_stems(b)) / len(stems) if stems else 0.0
 
 
-def restore_facts(source: str, parts: list[str]) -> tuple[list[str], int]:
+def restore_facts(source: str, parts: list[str], complete: bool = False) -> tuple[list[str], int]:
     """Stellt sicher, dass keine Zahl, kein Datum und keine Quelle fehlt, erfunden ist oder falsch steht.
 
     Wo die Ausgabe das nicht hält, tritt der Originalsatz an die Stelle des betroffenen Satzes. Im schlimmsten Fall
-    bleibt damit ein Satz unverändert; verloren oder verfälscht ist dann nichts. Liefert Sätze und Zahl der Eingriffe.
+    bleibt damit ein Satz unverändert; verloren oder verfälscht ist dann nichts. Mit complete gilt dasselbe für
+    Sätze mit einem neu behaupteten Gegensatz oder einer neuen Folge und für Aussagen der Vorlage, die ganz fehlen.
+    Liefert Sätze und Zahl der Eingriffe.
     """
     originals = raw_sentences(source)
     parts, changes = list(parts), 0
@@ -852,12 +855,24 @@ def restore_facts(source: str, parts: list[str]) -> tuple[list[str], int]:
             put(next(o for o in originals if citation in o), at)
             continue
         missing = missing_citations(source, text) + missing_facts(source, text)
-        if not missing:
+        if missing:
+            original = next((o for o in originals if missing[0] in o), None)
+            if original is None or original in parts:
+                break
+            put(original, None)
+            continue
+        if not complete:
             break
-        original = next((o for o in originals if missing[0] in o), None)
-        if original is None or original in parts:
+        # Ein Satz, der mit "obwohl" oder "sodass" einen Zusammenhang behauptet, den die Vorlage nicht kennt.
+        linked = next((i for i, p in enumerate(parts) if p not in originals and sentence_issues(source, p).get("verknüpfung")), None)
+        if linked is not None:
+            put(max(originals, key=lambda o: overlap(o, parts[linked])), linked)
+            continue
+        # Eine Aussage der Vorlage, von der in der Ausgabe so gut wie nichts mehr steht.
+        dropped = next((o for o in originals if len(core_stems(o)) >= 3 and overlap(o, text) < 0.25), None)
+        if dropped is None:
             break
-        put(original, None)
+        put(dropped, None)
     return parts, changes
 
 
@@ -897,7 +912,8 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
     1. Entwurf nach Bauplan; ist er grob daneben, höchstens retries neue Entwürfe mit Rückmeldung.
     2. Sätze ohne Grundlage und Fragmente streichen.
     3. Jeden Satz mit Floskel, wörtlicher Übernahme oder neuer Verknüpfung einzeln reparieren.
-    4. Fehlende, erfundene oder verrutschte Zahlen und Quellen durch den Originalsatz ersetzen.
+    4. Fehlende, erfundene oder verrutschte Zahlen und Quellen, neu behauptete Zusammenhänge und ganz fehlende
+       Aussagen durch den Originalsatz ersetzen, und diese Sätze noch einmal einzeln reparieren.
     5. Zu gleichförmige Satzlängen durch Zusammenlegen zweier Sätze auflockern.
     Jeder Schritt wird nur übernommen, wenn er nichts verschlechtert. Zurück kommen der Absatz, die Zahl der
     Eingriffe und die Einschränkungen (Orte, Zeiträume, Gruppen), die erhalten bleiben sollten.
@@ -923,7 +939,10 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
 
     parts = drop_unfounded(paragraph, raw_sentences(draft), strict)
     parts, repaired = repair_sentences(paragraph, parts, model, url, qualifiers)
-    parts, restored = restore_facts(paragraph, parts)
+    parts, restored = restore_facts(paragraph, parts, complete=True)
+    if restored:  # zurückgesetzte Originalsätze bekommen ihre eigene Chance, umformuliert zu werden
+        parts, more = repair_sentences(paragraph, parts, model, url, qualifiers)
+        repaired += more
     parts, merged = vary_rhythm(paragraph, parts, model, url, qualifiers)
     parts, again = restore_facts(paragraph, parts)
     return " ".join(parts), extra + repaired + restored + merged + again, qualifiers
@@ -1105,7 +1124,7 @@ def repeated_sentences(result: str) -> list[str]:
 # Wendungen, die eine Aussage genau machen oder einschränken: wo, bei wem, wofür, seit wann.
 QUALIFIER_PP = re.compile(
     r"\b(?:[Ii]n|[Ii]m|[Aa]m|[Bb]ei|[Bb]eim|[Pp]ro|[Jj]e|[Ss]eit|[Aa]us|[Ii]nnerhalb|[Aa]ußerhalb|[Ff]ür)\s+"
-    r"(?:(?:der|dem|den|des|die|das|einem|einer|eines)\s+)?(?:[a-zäöüß]+(?:en|em|er|es|e)\s+)?[A-ZÄÖÜ][\wäöüß-]*[\wäöüß]\b(?!-)")
+    r"(?:(?:der|dem|den|des|die|das|einem|einer|eines)\s+)?(?:(?!denen|deren|dessen|welche)[a-zäöüß]+(?:en|em|er|es|e)\s+)?[A-ZÄÖÜ][\wäöüß-]*[\wäöüß]\b(?!-)")
 QUALIFIER_ADJ = re.compile(
     r"\b(?:europä|österreich|deutsch|schweizer|amerikan|asiat|afrikan|internation|national|region|kommunal|städt|"
     r"ländl|bundes|landes|öffentl|privat|gesetzl|behördl|mehrtäg|eintäg|jährl|monatl|wöchentl|tägl)[a-zäöüß]*"

@@ -531,16 +531,17 @@ def plan_pool(source: str, style: str, own: list[str], pool_of=group_pool) -> tu
     return pool, note
 
 
-def fallback_plan(words: int) -> list[int]:
+def fallback_plan(words: int, strict: bool = False) -> list[int]:
     """Bauplan ohne Vorbild: lang, kurz, mittel, sehr lang, kurz … bis die Wortzahl erreicht ist."""
     shape, plan = [1.7, 0.6, 1.0, 2.1, 0.8, 1.3], []
-    unit = max(words / 7, 4)
+    unit, least = max(words / 7, 4), 5 if strict else 3
     while sum(plan) < words * 0.9:
-        plan.append(max(3, round(shape[len(plan) % len(shape)] * unit)))
+        plan.append(max(least, round(shape[len(plan) % len(shape)] * unit)))
     return plan
 
 
-def sentence_plan(paragraph: str, pool: list, rng: random.Random | None = None) -> tuple[list[int], str]:
+def sentence_plan(paragraph: str, pool: list, rng: random.Random | None = None,
+                  strict: bool = False) -> tuple[list[int], str]:
     """Abfolge von Satzlängen für einen Absatz, abgenommen von einem echten Absatz ähnlicher Länge.
 
     Die Längen werden auf die Wortzahl des Originalabsatzes skaliert. Zurück kommen Bauplan und Vorbild-Absatz,
@@ -552,15 +553,30 @@ def sentence_plan(paragraph: str, pool: list, rng: random.Random | None = None) 
     rng.shuffle(candidates)
     for total, lengths, example in candidates[:60]:
         plan = [max(3, round(n * words / total)) for n in lengths]
-        if usable_plan(plan):
+        if usable_plan(plan, strict):
             return plan, example
-    return fallback_plan(words), ""
+    return fallback_plan(words, strict), ""
 
 
-def usable_plan(plan: list[int]) -> bool:
-    """Abwechslungsreich, aber kein Extrem: 4 bis 45 Wörter pro Satz, höchstens ein sehr kurzer."""
-    return (len(plan) >= 2 and all(3 <= n <= 45 for n in plan) and sum(n < 6 for n in plan) <= 1
+def usable_plan(plan: list[int], strict: bool = False) -> bool:
+    """Abwechslungsreich, aber kein Extrem: höchstens 45 Wörter pro Satz und höchstens ein sehr kurzer.
+
+    Streng (akademischer Stil) heißt: jeder Satz mindestens 5 Wörter, höchstens einer unter 8. Sonst verlangt der
+    Bauplan Sätze aus zwei Wörtern, und das Modell schreibt Fragmente wie "38 %.".
+    """
+    least, short = (5, 8) if strict else (3, 6)
+    return (len(plan) >= 2 and all(least <= n <= 45 for n in plan) and sum(n < short for n in plan) <= 1
             and burstiness(" ".join("x " * (n - 1) + "x." for n in plan)) >= 0.35)
+
+
+def fragments(text: str) -> list[str]:
+    """Sätze, die keine sind: höchstens zwei Wörter oder weniger als zwei Wörter aus Buchstaben, etwa "38 %."."""
+    found = []
+    for sentence in sentences(text):
+        words = sentence.split()
+        if len(words) <= 2 or len([w for w in words if re.search(r"[A-Za-zÄÖÜäöüß]{2}", w)]) < 2:
+            found.append(sentence)
+    return found
 
 
 def plan_fit(plan: list[int], result: str) -> float:
@@ -611,14 +627,13 @@ def paragraph_request(paragraph: str, plan: list[int], avoid: list[str] | None =
                + "; ".join(required) + "\n" if required else "")
             + ("Diese Einschränkungen müssen erhalten bleiben: " + "; ".join(qualifiers) + "\n" if qualifiers else "")
             + claims
-            + ("Diese Wendungen stehen schon in früheren Absätzen, verwende sie hier nicht: " + ", ".join(avoid) + "\n"
-               if avoid else "")
+            + ("Diese Wendungen sind verboten: " + ", ".join(avoid) + "\n" if avoid else "")
             + "Füge nichts hinzu, was nicht im Absatz steht.\n\n"
             f"Absatz:\n{paragraph}")
 
 
 def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[str] | None = None,
-                       qualifiers: list[str] | None = None) -> list[str]:
+                       qualifiers: list[str] | None = None, strict: bool = False) -> list[str]:
     found = []
     lost = missing_qualifiers(qualifiers or [], result)
     if lost:
@@ -637,7 +652,10 @@ def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[st
         found.append(f'Dieser Satz hat keine Grundlage in der Vorlage, streich ihn: "{sentence}"')
     repeated = [h for h in habits(result) if h in (avoid or [])]
     if repeated:
-        found.append("Diese Wendungen stehen schon in früheren Absätzen, formuliere hier anders: " + ", ".join(repeated) + ".")
+        found.append("Diese verbotenen Wendungen stehen noch drin, formuliere anders: " + ", ".join(repeated) + ".")
+    if strict:
+        for fragment in fragments(result):
+            found.append(f'Das ist kein vollständiger Satz: "{fragment}". Bau ihn in einen Nachbarsatz ein.')
     added = added_facts(source, result)
     if added:
         found.append("Diese Angaben stehen nicht in der Vorlage und müssen raus: " + ", ".join(added) + ".")
@@ -668,7 +686,7 @@ def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[st
 
 
 def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str] | None = None,
-                      qualifiers: list[str] | None = None) -> float:
+                      qualifiers: list[str] | None = None, strict: bool = False) -> float:
     words, target = len(result.split()), len(source.split())
     fidelity = 20 * len(missing_qualifiers(qualifiers or [], result)) + 25 * len(misplaced_citations(source, result)) \
         + 10 * len(repeated_sentences(result)) + 20 * sum(extra for _, extra, _ in new_connectors(source, result)) \
@@ -678,7 +696,8 @@ def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str
     return (25 * (len(missing_facts(source, result)) + len(added_facts(source, result))
                   + len(missing_citations(source, result)) + len(doubled_citations(source, result)))
             + off + 15 * min(plan_fit(plan, result), 1.0) + 18 * len(unchanged_sentences(source, result))
-            + 5 * tell_count(result) + 5 * len(crutches(result)) + 5 * repeated + fidelity)
+            + 12 * tell_count(result) + 5 * len(crutches(result)) + 12 * repeated + fidelity
+            + (25 * len(fragments(result)) if strict else 0))
 
 
 def flatten(paragraph: str) -> str:
@@ -694,13 +713,14 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
     müssen. Zurück kommen die beste Fassung, die Zahl der Nachbesserungen und diese Einschränkungen.
     """
     qualifiers = extract_qualifiers(paragraph)
-    plan, example = sentence_plan(paragraph, pool, rng)
+    strict = style == "Akademisch"
+    plan, example = sentence_plan(paragraph, pool, rng, strict)
     messages = [{"role": "system", "content": system_prompt(style, [example] if example else [])},
                 {"role": "user", "content": paragraph_request(paragraph, plan, avoid, qualifiers)}]
     current = flatten(_chat(model, url, messages))
-    best, best_score, extra = current, paragraph_badness(paragraph, current, plan, avoid, qualifiers), 0
+    best, best_score, extra = current, paragraph_badness(paragraph, current, plan, avoid, qualifiers, strict), 0
     for _ in range(retries):
-        issues = paragraph_problems(paragraph, current, plan, avoid, qualifiers)
+        issues = paragraph_problems(paragraph, current, plan, avoid, qualifiers, strict)
         if not issues:
             break
         current = flatten(_chat(model, url, messages + [
@@ -708,7 +728,7 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
             {"role": "user", "content": "Das passt noch nicht:\n- " + "\n- ".join(issues) +
              "\n\nGib nur den verbesserten Absatz aus."}]))
         extra += 1
-        score = paragraph_badness(paragraph, current, plan, avoid, qualifiers)
+        score = paragraph_badness(paragraph, current, plan, avoid, qualifiers, strict)
         if score <= best_score:
             best, best_score = current, score
     return best, extra, qualifiers
@@ -728,7 +748,8 @@ def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, p
     """
     paras = paragraphs(text)
     todo = [i for i, p in enumerate(paras) if needs_rewrite(p)]
-    out, extra, used, qualifiers = list(paras), 0, [], []
+    # Die Wendungen sind von Anfang an verboten, nicht erst nach ihrem ersten Auftreten.
+    out, extra, used, qualifiers = list(paras), 0, [name for _, name in HABITS], []
     for step, i in enumerate(todo, start=1):
         progress(step, len(todo))
         out[i], more, found = rewrite_paragraph(paras[i], style, model, url, pool or [], retries, rng, used)
@@ -884,7 +905,7 @@ def repeated_sentences(result: str) -> list[str]:
 # Wendungen, die eine Aussage genau machen oder einschränken: wo, bei wem, wofür, seit wann.
 QUALIFIER_PP = re.compile(
     r"\b(?:[Ii]n|[Ii]m|[Aa]m|[Bb]ei|[Bb]eim|[Pp]ro|[Jj]e|[Ss]eit|[Aa]us|[Ii]nnerhalb|[Aa]ußerhalb|[Ff]ür)\s+"
-    r"(?:(?:der|dem|den|des|die|das|einem|einer|eines)\s+)?(?:[a-zäöüß]+(?:en|em|er|es|e)\s+)?[A-ZÄÖÜ][\wäöüß-]+")
+    r"(?:(?:der|dem|den|des|die|das|einem|einer|eines)\s+)?(?:[a-zäöüß]+(?:en|em|er|es|e)\s+)?[A-ZÄÖÜ][\wäöüß-]*[\wäöüß]\b(?!-)")
 QUALIFIER_ADJ = re.compile(
     r"\b(?:europä|österreich|deutsch|schweizer|amerikan|asiat|afrikan|internation|national|region|kommunal|städt|"
     r"ländl|bundes|landes|öffentl|privat|gesetzl|behördl|mehrtäg|eintäg|jährl|monatl|wöchentl|tägl)[a-zäöüß]*"
@@ -929,8 +950,13 @@ def shrinkage(source: str, result: str) -> int:
     return round(100 * (before - len(result.split())) / before) if before else 0
 
 
-def warnings(source: str, result: str, qualifiers: list[str] | None = None) -> str:
+def warnings(source: str, result: str, qualifiers: list[str] | None = None, strict: bool = False) -> str:
     parts = []
+    if strict and fragments(result):
+        parts.append("Satzfragment: " + " / ".join(f'"{f}"' for f in fragments(result)))
+    left = habits(result)
+    if left:
+        parts.append("Floskel: " + ", ".join(left))
     lost = missing_qualifiers(qualifiers or [], result)
     if lost:
         parts.append("Einschränkung fehlt: " + "; ".join(lost))
@@ -976,6 +1002,7 @@ class App:
         self.installed: list[str] = []
         self.memory: tuple[float | None, float | None] = (None, None)
         self.busy = False
+        self.last_style = ""
         self.pulling: str | None = None
         self.cancel_pull = threading.Event()
         self.updating = False
@@ -1409,7 +1436,8 @@ class App:
             f"{changed_share(result, added)} % neu formuliert  ·  "
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
             f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))
-        self.warning.config(text="  ".join(filter(None, [warnings(source, result, qualifiers), note])))
+        strict = self.last_style == "Akademisch"
+        self.warning.config(text="  ".join(filter(None, [warnings(source, result, qualifiers, strict), note])))
 
     def _on_cleared(self, count: int) -> None:
         self.clear.config(state="normal")
@@ -1443,6 +1471,7 @@ class App:
         self.warning.config(text="")
         self.status.config(text="Schreibe um … das kann bei langen Texten ein, zwei Minuten dauern.", fg=MUTED)
         model, style, source = self.model.get(), self.style.get(), self.source.get()
+        self.last_style = style
 
         def work() -> None:
             start = time.time()

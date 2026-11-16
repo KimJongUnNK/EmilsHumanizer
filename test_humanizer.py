@@ -732,7 +732,7 @@ def test_rewrite_paragraph_bessert_nach_und_nimmt_beste(scripted_ollama):
     good = ("Bei 50.000 Gästen verursachen Licht und Ton bis zu 1,2 Gigawattstunden (vgl. Hofer 2019, S. 112), "
             "was den Energiebedarf zum Kernthema macht. Viel ist das. LED drückt den Bedarf um etwa 60 %.")
     replies += ["Kaputt ohne Zahlen. Wirklich.", good, "Wieder kaputt. Ganz."]
-    pool = [(36, [17, 3, 9], "Ein echter Absatz als Vorbild.")]
+    pool = [(36, [17, 6, 13], "Ein echter Absatz als Vorbild.")]
     result, extra, _ = h.rewrite_paragraph(PARA, "Akademisch", "m", url, pool, rng=random.Random(1))
     assert result == good and extra >= 1
     assert "<beispiel>\nEin echter Absatz als Vorbild.\n</beispiel>" in seen[0]["messages"][0]["content"]
@@ -773,15 +773,15 @@ def test_habits_und_wiederholung_ueber_absaetze():
     assert h.habits("Die Technik stellt einen zentralen Aspekt dar.") == ['"… stellt … dar"', '"zentraler Aspekt/Punkt"']
     assert h.habits("Kurz und klar.") == []
     found = h.paragraph_problems(PARA, "Das stellt viel dar. Ganz anders.", [3, 2], ['"… stellt … dar"'])
-    assert any("früheren Absätzen" in f for f in found)
-    assert "verwende sie hier nicht" in h.paragraph_request(PARA, [10, 10], ['"somit"'])
+    assert any("verbotenen Wendungen" in f for f in found)
+    assert 'Diese Wendungen sind verboten: "somit"' in h.paragraph_request(PARA, [10, 10], ['"somit"'])
 
 
 def test_humanize_checked_gibt_gewohnheiten_weiter(scripted_ollama):
     url, replies, seen = scripted_ollama
     replies += ["Die Lage stellt viel dar. Sonst nichts."] * 6
     h.humanize_checked(PARA + "\n\n" + LONG, "Akademisch", "m", url, [], retries=0)
-    assert "stellt … dar" not in seen[0]["messages"][1]["content"]
+    assert '"… stellt … dar"' in seen[0]["messages"][1]["content"]
     assert '"… stellt … dar"' in seen[1]["messages"][1]["content"]
 
 
@@ -914,3 +914,40 @@ def test_auftrag_ohne_alte_verbindungsliste():
     request = h.paragraph_request(PARA, [10, 10, 10])
     assert "mit \"obwohl\", \"während\", \"sodass\"" not in request
     assert "kein \"obwohl\" ohne Gegensatz in der Vorlage" in request
+
+
+
+# --- Fragmente und Floskeln von Anfang an ---
+def test_fragmente():
+    assert h.fragments("38 %. Eine Studie zeigt das deutlich. Kurz und klar. Na gut.") == ["38 %.", "Na gut."]
+    assert h.fragments(PARA) == []
+    text = "Systeme steuern Besucherströme präziser als früher. 38 %."
+    assert any("kein vollständiger Satz" in f for f in h.paragraph_problems(text, text, [6, 2], strict=True))
+    assert not any("kein vollständiger Satz" in f for f in h.paragraph_problems(text, text, [6, 2]))
+    assert 'Satzfragment: "38 %."' in h.warnings(text, text, strict=True)
+    assert "Satzfragment" not in h.warnings(text, text)
+    assert h.paragraph_badness(text, text, [6, 2], strict=True) >= h.paragraph_badness(text, text, [6, 2]) + 25
+
+
+def test_strenge_bauplaene():
+    assert h.usable_plan([6, 30, 9], strict=True) and not h.usable_plan([3, 30, 9], strict=True)
+    assert h.usable_plan([3, 30, 9]) and not h.usable_plan([6, 7, 30], strict=True)
+    assert all(n >= 5 for n in h.fallback_plan(30, strict=True))
+    plan, example = h.sentence_plan(PARA, [(36, [17, 2, 13], "Mit Fragment.")], random.Random(1), strict=True)
+    assert example == "" and all(n >= 5 for n in plan)
+
+
+def test_floskel_loest_nachbesserung_aus_und_steht_rot_da(scripted_ollama):
+    url, replies, seen = scripted_ollama
+    para = "Die Technik hilft den Veranstaltern bei der Planung sehr. Sie senkt außerdem die laufenden Kosten deutlich."
+    clean = "Bei der Planung hilft den Veranstaltern die Technik sehr, und die laufenden Kosten senkt sie deutlich. Außerdem."
+    replies += ["Die Technik spielt eine zentrale Rolle bei der Planung der Veranstalter. Sie senkt die laufenden Kosten deutlich.",
+                clean, clean]
+    h.humanize_checked(para, "Akademisch", "m", url, [])
+    assert len(seen) >= 2 and "verbotenen Wendungen" in seen[1]["messages"][-1]["content"]
+    assert 'Floskel: "spielt eine … Rolle"' in h.warnings(para, "Das spielt eine große Rolle für alle hier.")
+
+
+def test_einschraenkung_ohne_abgeschnittenes_wort():
+    assert h.extract_qualifiers("Laut dem Verband für Licht- und Bühnentechnik nutzen in Deutschland 90 % DMX.") == \
+        ["in Deutschland"]

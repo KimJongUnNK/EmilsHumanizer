@@ -119,6 +119,14 @@ def _mask(text: str) -> str:
     return NUMBER_DOT.sub(r"\1", ABBREVIATIONS.sub(lambda m: m.group(1).replace(".", ""), text))
 
 
+def raw_sentences(text: str) -> list[str]:
+    """Wie sentences(), aber unverändert im Wortlaut, damit sich ein Text aus den Sätzen wieder zusammensetzen lässt."""
+    keep = "\u2024"  # Platzhalter gleicher Länge für Punkte, die kein Satzende sind
+    masked = ABBREVIATIONS.sub(lambda m: m.group(0).replace(".", keep), text)
+    masked = NUMBER_DOT.sub(lambda m: m.group(1) + keep, masked)
+    return [part.replace(keep, ".") for part in re.split(r"(?<=[.!?…])\s+", masked.strip()) if part]
+
+
 def sentences(text: str) -> list[str]:
     """Zerlegt in Sätze, ohne an Abkürzungen (z. B., bzw.) oder Datumsangaben (28.09.) zu trennen.
 
@@ -705,33 +713,220 @@ def flatten(paragraph: str) -> str:
     return re.sub(r"\s*\n+\s*", " ", paragraph).strip()
 
 
-def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 2,
-                      rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
-    """Schreibt einen Absatz nach Bauplan um und wiederholt bis zu retries-mal mit konkreter Rückmeldung.
+def sentence_issues(source: str, sentence: str) -> dict[str, list[str]]:
+    """Was an einem einzelnen Satz der Ausgabe zu reparieren ist: Floskeln, wörtliche Übernahme, neue Verknüpfung."""
+    low = sentence.lower()
+    issues = {
+        "floskel": [t for t in AI_TELLS if t in low] + habits(sentence),
+        "wörtlich": unchanged_sentences(source, sentence)[:1],
+        "verknüpfung": [w for words in CONNECTORS.values() for w in words
+                        if re.search(r"\b%s\b" % w, sentence, re.I) and not re.search(r"\b%s\b" % w, source, re.I)],
+    }
+    return {k: v for k, v in issues.items() if v}
 
-    Vorher sucht die App die Einschränkungen des Absatzes heraus (Orte, Zeiträume, Gruppen), die erhalten bleiben
-    müssen. Zurück kommen die beste Fassung, die Zahl der Nachbesserungen und diese Einschränkungen.
+
+def issue_score(issues: dict[str, list[str]]) -> int:
+    return len(issues.get("floskel", [])) + 2 * len(issues.get("wörtlich", [])) + 2 * len(issues.get("verknüpfung", []))
+
+
+REPAIR_SYSTEM = ("Du formulierst einzelne deutsche Sätze um. Du gibst nur den neuen Satz aus, ohne Kommentar und ohne "
+                 "Anführungszeichen. Du fügst keine Information hinzu und lässt keine weg. Zahlen, Namen und "
+                 "Quellenangaben in Klammern bleiben Zeichen für Zeichen gleich.")
+
+
+def repair_request(sentence: str, issues: dict[str, list[str]]) -> str:
+    lines = []
+    if "floskel" in issues:
+        lines.append("Vermeide diese Wendungen: " + ", ".join(issues["floskel"]) + ". Sag konkret, was gemeint ist.")
+    if "wörtlich" in issues:
+        lines.append("Der Satz ist fast unverändert aus einer Vorlage übernommen. Stell ihn um: beginne mit einem "
+                     "anderen Satzteil, wähle andere Verben und Wörter. Der Inhalt bleibt gleich.")
+    if "verknüpfung" in issues:
+        lines.append("Die Wörter " + ", ".join(f'"{w}"' for w in issues["verknüpfung"]) + " behaupten einen "
+                     "Zusammenhang, der nicht belegt ist. Verbinde die Aussagen neutral (mit \"und\", Relativsatz oder "
+                     "Doppelpunkt) oder mach zwei Sätze daraus.")
+    keep = list(dict.fromkeys(CITATION.findall(sentence) + [surface for _, _, surface in facts(sentence)]))
+    if keep:
+        lines.append("Diese Angaben bleiben wörtlich: " + "; ".join(keep))
+    return "Formuliere diesen Satz neu.\n" + "\n".join(lines) + "\n\nSatz: " + sentence
+
+
+def keeps_content(source: str, old: str, new: str, qualifiers: list[str]) -> bool:
+    """Trägt die neue Fassung alles, was die alte trug, und nichts, was die Vorlage nicht hat?"""
+    carried = [q for q in qualifiers if core_stems(q) <= core_stems(old)]
+    return (bool(new.strip())
+            and 0.6 * len(old.split()) <= len(new.split()) <= 1.6 * len(old.split()) + 3
+            and not missing_facts(old, new) and all(c in new for c in CITATION.findall(old))
+            and not added_facts(source, new) and not unsupported_sentences(source, new)
+            and not missing_qualifiers(carried, new))
+
+
+def clean_reply(reply: str) -> str:
+    reply = flatten(reply)
+    reply = re.sub(r"^(?:Satz|Neuer Satz|Umformulierung)\s*:\s*", "", reply, flags=re.I)
+    return reply.strip("\"„“”»«").strip()
+
+
+def repair_sentences(source: str, parts: list[str], model: str, url: str, qualifiers: list[str],
+                     tries: int = 2) -> tuple[list[str], int]:
+    """Repariert jeden fehlerhaften Satz einzeln. Eine Reparatur zählt nur, wenn sie den Satz messbar verbessert
+    und inhaltlich nichts verliert oder hinzufügt; sonst bleibt der alte Satz. Liefert Sätze und Zahl der Reparaturen."""
+    done = 0
+    for i, sentence in enumerate(parts):
+        issues = sentence_issues(source, sentence)
+        for _ in range(tries):
+            if not issues:
+                break
+            try:
+                candidate = clean_reply(_chat(model, url, [{"role": "system", "content": REPAIR_SYSTEM},
+                                                           {"role": "user", "content": repair_request(sentence, issues)}]))
+            except OllamaError:
+                break
+            new_issues = sentence_issues(source, candidate)
+            if keeps_content(source, sentence, candidate, qualifiers) and issue_score(new_issues) < issue_score(issues):
+                parts[i], sentence, issues = candidate, candidate, new_issues
+                done += 1
+    return parts, done
+
+
+def drop_unfounded(source: str, parts: list[str], strict: bool) -> list[str]:
+    """Streicht ohne Modell, was nicht in den Absatz gehört: Sätze ohne Grundlage in der Vorlage, die keine Angabe
+    tragen, und im akademischen Stil Fragmente wie "38 %.", deren Angabe schon in einem anderen Satz steht."""
+    kept = []
+    for i, sentence in enumerate(parts):
+        rest = " ".join(parts[:i] + parts[i + 1:])
+        carries = CITATION.search(sentence) or missing_facts(sentence, rest)
+        if unsupported_sentences(source, sentence) and not carries:
+            continue
+        if strict and fragments(sentence) and not carries:
+            continue
+        kept.append(sentence)
+    return kept or parts[:1]
+
+
+def overlap(a: str, b: str) -> float:
+    stems = core_stems(a)
+    return len(stems & core_stems(b)) / len(stems) if stems else 0.0
+
+
+def restore_facts(source: str, parts: list[str]) -> tuple[list[str], int]:
+    """Stellt sicher, dass keine Zahl, kein Datum und keine Quelle fehlt, erfunden ist oder falsch steht.
+
+    Wo die Ausgabe das nicht hält, tritt der Originalsatz an die Stelle des betroffenen Satzes. Im schlimmsten Fall
+    bleibt damit ein Satz unverändert; verloren oder verfälscht ist dann nichts. Liefert Sätze und Zahl der Eingriffe.
+    """
+    originals = raw_sentences(source)
+    parts, changes = list(parts), 0
+
+    def put(original: str, at: int | None) -> None:
+        """Setzt den Originalsatz an Stelle at oder dorthin, wo der ähnlichste Satz der Ausgabe steht."""
+        nonlocal changes
+        changes += 1
+        if original in parts:
+            return
+        if at is None:
+            scores = [overlap(original, p) for p in parts]
+            if scores and max(scores) >= 0.5:
+                at = scores.index(max(scores))
+        if at is not None:
+            parts[at] = original
+        else:
+            position = round(originals.index(original) * len(parts) / max(len(originals), 1))
+            parts.insert(min(position, len(parts)), original)
+
+    for _ in range(3 * len(originals) + 3):
+        text = " ".join(parts)
+        invented = next((i for i, p in enumerate(parts) if added_facts(source, p)), None)
+        if invented is not None:
+            best = max(originals, key=lambda o: overlap(o, parts[invented]))
+            if overlap(best, parts[invented]) >= 0.3:
+                put(best, invented)
+            else:
+                del parts[invented]
+                changes += 1
+            continue
+        moved = misplaced_citations(source, text)
+        if moved:
+            citation = moved[0][0]
+            at = next((i for i, p in enumerate(parts) if citation in p), None)
+            put(next(o for o in originals if citation in o), at)
+            continue
+        missing = missing_citations(source, text) + missing_facts(source, text)
+        if not missing:
+            break
+        original = next((o for o in originals if missing[0] in o), None)
+        if original is None or original in parts:
+            break
+        put(original, None)
+    return parts, changes
+
+
+def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers: list[str]) -> tuple[list[str], int]:
+    """Sind die Sätze eines Absatzes zu gleich lang, werden die zwei Nachbarn zusammengelegt, bei denen das am
+    meisten bringt. Angenommen wird das nur, wenn nichts verloren geht und kein neuer Zusammenhang behauptet wird."""
+    def spread(lengths: list[int]) -> float:
+        return burstiness(" ".join("x " * (n - 1) + "x." for n in lengths))
+
+    lengths = [len(p.split()) for p in parts]
+    if len(parts) < 3 or spread(lengths) >= 0.45:
+        return parts, 0
+    options = [(spread(lengths[:i] + [lengths[i] + lengths[i + 1]] + lengths[i + 2:]), i)
+               for i in range(len(parts) - 1) if lengths[i] + lengths[i + 1] <= 45]
+    if not options or max(options)[0] <= spread(lengths):
+        return parts, 0
+    i = max(options)[1]
+    pair = parts[i] + " " + parts[i + 1]
+    request = ("Verbinde diese zwei Sätze zu einem einzigen Satz. Verbinde neutral: mit \"und\", einem Relativsatz, "
+               "einem Doppelpunkt oder einem Semikolon. Kein \"obwohl\", \"sodass\", \"daher\", \"weil\". Alle Zahlen und "
+               "Quellenangaben bleiben wörtlich.\n\nSätze: " + pair)
+    try:
+        merged = clean_reply(_chat(model, url, [{"role": "system", "content": REPAIR_SYSTEM},
+                                                {"role": "user", "content": request}]))
+    except OllamaError:
+        return parts, 0
+    fine = (len(raw_sentences(merged)) == 1 and keeps_content(source, pair, merged, qualifiers)
+            and issue_score(sentence_issues(source, merged)) <= issue_score(sentence_issues(source, parts[i]))
+            + issue_score(sentence_issues(source, parts[i + 1])))
+    return (parts[:i] + [merged] + parts[i + 2:], 1) if fine else (parts, 0)
+
+
+def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,
+                      rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
+    """Schreibt einen Absatz nach Bauplan um und repariert ihn danach Satz für Satz.
+
+    1. Entwurf nach Bauplan; ist er grob daneben, höchstens retries neue Entwürfe mit Rückmeldung.
+    2. Sätze ohne Grundlage und Fragmente streichen.
+    3. Jeden Satz mit Floskel, wörtlicher Übernahme oder neuer Verknüpfung einzeln reparieren.
+    4. Fehlende, erfundene oder verrutschte Zahlen und Quellen durch den Originalsatz ersetzen.
+    5. Zu gleichförmige Satzlängen durch Zusammenlegen zweier Sätze auflockern.
+    Jeder Schritt wird nur übernommen, wenn er nichts verschlechtert. Zurück kommen der Absatz, die Zahl der
+    Eingriffe und die Einschränkungen (Orte, Zeiträume, Gruppen), die erhalten bleiben sollten.
     """
     qualifiers = extract_qualifiers(paragraph)
     strict = style == "Akademisch"
     plan, example = sentence_plan(paragraph, pool, rng, strict)
     messages = [{"role": "system", "content": system_prompt(style, [example] if example else [])},
                 {"role": "user", "content": paragraph_request(paragraph, plan, avoid, qualifiers)}]
-    current = flatten(_chat(model, url, messages))
-    best, best_score, extra = current, paragraph_badness(paragraph, current, plan, avoid, qualifiers, strict), 0
+    draft = flatten(_chat(model, url, messages))
+    score, extra = paragraph_badness(paragraph, draft, plan, avoid, qualifiers, strict), 0
     for _ in range(retries):
-        issues = paragraph_problems(paragraph, current, plan, avoid, qualifiers, strict)
-        if not issues:
+        if score < 60:  # nur bei groben Mängeln neu ansetzen, alles andere reparieren die Schritte unten gezielter
             break
-        current = flatten(_chat(model, url, messages + [
-            {"role": "assistant", "content": current},
+        issues = paragraph_problems(paragraph, draft, plan, avoid, qualifiers, strict)
+        again = flatten(_chat(model, url, messages + [
+            {"role": "assistant", "content": draft},
             {"role": "user", "content": "Das passt noch nicht:\n- " + "\n- ".join(issues) +
              "\n\nGib nur den verbesserten Absatz aus."}]))
         extra += 1
-        score = paragraph_badness(paragraph, current, plan, avoid, qualifiers, strict)
-        if score <= best_score:
-            best, best_score = current, score
-    return best, extra, qualifiers
+        if paragraph_badness(paragraph, again, plan, avoid, qualifiers, strict) < score:
+            draft, score = again, paragraph_badness(paragraph, again, plan, avoid, qualifiers, strict)
+
+    parts = drop_unfounded(paragraph, raw_sentences(draft), strict)
+    parts, repaired = repair_sentences(paragraph, parts, model, url, qualifiers)
+    parts, restored = restore_facts(paragraph, parts)
+    parts, merged = vary_rhythm(paragraph, parts, model, url, qualifiers)
+    parts, again = restore_facts(paragraph, parts)
+    return " ".join(parts), extra + repaired + restored + merged + again, qualifiers
 
 
 def needs_rewrite(paragraph: str) -> bool:
@@ -740,7 +935,7 @@ def needs_rewrite(paragraph: str) -> bool:
 
 
 def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, pool: list | None = None,
-                     retries: int = 2, progress=lambda done, total: None,
+                     retries: int = 1, progress=lambda done, total: None,
                      rng: random.Random | None = None) -> tuple[str, int, list[str]]:
     """Schreibt den Text Absatz für Absatz um.
 
@@ -766,7 +961,8 @@ NUMBER_WORDS = dict(zip(map(str, range(2, 13)), "zwei drei vier fünf sechs sieb
 
 
 UNITS = (r"%|Prozent|‰|Promille|€|Euro|dB\(A\)|km|kWh|MWh|GWh|Gigawattstunden|Megawattstunden|Kilowattstunden|"
-         r"Minuten|Stunden|Tagen|Tage|Wochen|Monaten|Monate|Jahren|Jahre|Personen|Prozentpunkte")
+         r"km/h|Minuten|Minute|Stunden|Stunde|Tagen|Tage|Tag|Wochen|Woche|Monaten|Monate|Monat|Jahren|Jahre|Jahr|"
+         r"Personen|Person|Prozentpunkte|Metern|Meter|Watt")
 FACT_WITH_UNIT = re.compile(r"(\d+(?:[.,:/-]\d+)*)(?:\s?(%s))?(?![\w(])" % UNITS)
 SAME_UNIT = {"Prozent": "%", "Promille": "‰", "Euro": "€", "GWh": "giga", "MWh": "mega", "kWh": "kilo"}
 
@@ -774,13 +970,13 @@ SAME_UNIT = {"Prozent": "%", "Promille": "‰", "Euro": "€", "GWh": "giga", "M
 def facts(text: str) -> list[tuple[str, str, str]]:
     """Zahlen mit ihrer Einheit als (Zahl, vereinheitlichte Einheit, wie es dasteht).
 
-    "60 %" und "60 Prozent" bekommen dieselbe Einheit, Wort-Einheiten werden über ihre ersten vier Buchstaben
-    verglichen, damit "Personen" und "Personen," oder "Tage" und "Tagen" gleich zählen.
+    "60 %" und "60 Prozent" bekommen dieselbe Einheit, Wort-Einheiten werden über ihre ersten drei Buchstaben
+    verglichen, damit "Tag", "Tage" und "Tagen" gleich zählen.
     """
     found = []
     for m in FACT_WITH_UNIT.finditer(text):
         unit = m.group(2) or ""
-        unit = SAME_UNIT.get(unit, unit if not unit[:1].isalpha() or unit == "dB(A)" else unit.lower()[:4])
+        unit = SAME_UNIT.get(unit, unit if not unit[:1].isalpha() or unit in ("dB(A)", "km/h") else unit.lower()[:3])
         found.append((m.group(1), unit, m.group(0)))
     return found
 
@@ -795,8 +991,12 @@ def missing_facts(source: str, result: str) -> list[str]:
     have = {(n, u) for n, u, _ in facts(result)}
     numbers = {n for n, _ in have}
     missing = []
-    for number, unit, surface in facts(source):
+    # Zahlen in Quellenangaben prüft missing_citations(), sonst zählt eine fehlende Quelle doppelt.
+    for number, unit, surface in facts(CITATION.sub(" ", source)):
         spelled = number in NUMBER_WORDS and re.search(r"\b%s\b" % NUMBER_WORDS[number], result, re.I)
+        if number == "1":  # "1 Tag" -> "einen Tag"; "ein" allein steht überall, deshalb nur mit dem Wort danach
+            after = re.escape(surface.split(None, 1)[1][:4]) if " " in surface else ""
+            spelled = bool(after) and re.search(r"\bein(?:e[nmrs]?)?\s+%s" % after, result, re.I)
         present = (number, unit) in have if unit else number in numbers
         if not present and not spelled and surface not in missing:
             missing.append(surface)

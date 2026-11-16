@@ -33,7 +33,9 @@ def check(source: str, out: str, style: str) -> dict:
         "neue Verknüpfungen": (sum(e for a, b in pairs for _, e, _ in h.new_connectors(a, b)), lambda v: v <= 1),
         "Sätze ohne Grundlage": ([s[:60] for a, b in pairs for s in h.unsupported_sentences(a, b)], lambda v: len(v) <= 1),
         "Fragmente": (h.fragments(out) if strict else [], lambda v: not v),
-        "Floskeln": (h.tell_count(out) + len(h.habits(out)), lambda v: v <= 1),
+        # An 900 mitgelieferten Menschentexten geeicht: 80 % von ihnen haben höchstens 2, und 80 % der sachlichen
+        # eine Streuung ab 0,45.
+        "Floskeln": (h.tell_count(out) + len(h.habits(out)), lambda v: v <= 2),
         "Streuung": (h.burstiness(out), lambda v: v >= 0.45),
         "kaum verändert": (len(h.unchanged_sentences(source, out)), lambda v: v <= 0.2 * count),
         "Länge": (round(ratio, 2), lambda v: 0.8 <= v <= 1.2),

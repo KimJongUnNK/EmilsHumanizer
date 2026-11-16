@@ -517,8 +517,9 @@ def test_app_warnung_bei_fehlendem_datum(root, fake_ollama, monkeypatch):
     assert app.source.get() == "Mitgeliefert"
     app.input.insert("1.0", "Das Fest ist am 28.09.2026 in Dornbirn mit 300 Gästen. Alle kamen pünktlich und blieben lange.")
     app.run()
-    pump(root, lambda: app.warning["text"] != "")
-    assert "28.09.2026" in app.warning["text"] and "300" in app.warning["text"]
+    pump(root, lambda: app.output.get("1.0", "end").strip() != "")
+    # Das Modell hat Datum und Zahl weggelassen; die App setzt dafür den Originalsatz zurück.
+    assert "28.09.2026" in app.output.get("1.0", "end") and "300 Gästen" in app.output.get("1.0", "end")
     app.run()
     assert app.warning["text"] == ""
 
@@ -581,7 +582,7 @@ def scripted_ollama():
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-            answer = replies.pop(0)
+            answer = replies.pop(0) if len(replies) > 1 else replies[0]  # die letzte Antwort gilt für alles Weitere
             self.send_response(200)
             self.end_headers()
             self.wfile.write(json.dumps({"message": {"content": answer}}).encode())
@@ -727,30 +728,6 @@ def test_needs_rewrite():
     assert h.needs_rewrite(PARA)
 
 
-def test_rewrite_paragraph_bessert_nach_und_nimmt_beste(scripted_ollama):
-    url, replies, seen = scripted_ollama
-    good = ("Bei 50.000 Gästen verursachen Licht und Ton bis zu 1,2 Gigawattstunden (vgl. Hofer 2019, S. 112), "
-            "was den Energiebedarf zum Kernthema macht. Viel ist das. LED drückt den Bedarf um etwa 60 %.")
-    replies += ["Kaputt ohne Zahlen. Wirklich.", good, "Wieder kaputt. Ganz."]
-    pool = [(36, [17, 6, 13], "Ein echter Absatz als Vorbild.")]
-    result, extra, _ = h.rewrite_paragraph(PARA, "Akademisch", "m", url, pool, rng=random.Random(1))
-    assert result == good and extra >= 1
-    assert "<beispiel>\nEin echter Absatz als Vorbild.\n</beispiel>" in seen[0]["messages"][0]["content"]
-    assert "Bauplan: genau 3 Sätze" in seen[0]["messages"][1]["content"]
-    assert seen[1]["messages"][2]["content"] == "Kaputt ohne Zahlen. Wirklich."
-
-
-def test_humanize_checked_absatzweise(scripted_ollama):
-    url, replies, seen = scripted_ollama
-    text = "Überschrift ohne Punkt\n\n" + PARA + "\n\n" + LONG
-    replies += ["Erster Absatz neu. Mit 50.000 und 1,2 und 60 (vgl. Hofer 2019, S. 112)."] * 3 + ["Zweiter neu. Ja."] * 3
-    steps = []
-    result, passes, _ = h.humanize_checked(text, "Akademisch", "m", url, [], progress=lambda d, t: steps.append((d, t)))
-    parts = h.paragraphs(result)
-    assert parts[0] == "Überschrift ohne Punkt" and parts[1].startswith("Erster") and parts[2].startswith("Zweiter")
-    assert steps == [(1, 2), (2, 2)] and passes == 1 + (len(seen) - 2)
-
-
 def test_app_zeigt_fortschritt_und_kopieren_stellt_status_wieder_her(root, fake_ollama):
     url, _, _ = fake_ollama
     app = h.App(root, url)
@@ -819,22 +796,6 @@ def test_einschraenkungen_finden_und_pruefen():
     assert h.missing_qualifiers(found[:3], out) == ["In Österreich", "im Freien"]
     assert h.missing_qualifiers(["europäischen Festivalveranstalter"], "38 % der europäischen Festivalveranstaltern") == []
     assert h.missing_qualifiers(["europäischen Festivalveranstalter"], "38 % der Veranstalter") == ["europäischen Festivalveranstalter"]
-
-
-def test_einschraenkungen_landen_in_auftrag_und_rueckmeldung(scripted_ollama):
-    url, replies, seen = scripted_ollama
-    para = ("In Österreich gilt bei Konzerten im Freien häufig ein Richtwert von 100 dB(A). "
-            "Gleichzeitig müssen Anrainer vor Lärm geschützt werden.")
-    good = ("Anrainer müssen vor Lärm geschützt werden, auch wenn in Österreich bei Konzerten im Freien oft ein "
-            "Richtwert von 100 dB(A) gilt. Eben.")
-    replies += ["Für Konzerte gilt ein Richtwert von 100 dB(A). Anrainer brauchen Schutz.", good, good]
-    result, extra, found = h.rewrite_paragraph(para, "Akademisch", "m", url, [], rng=random.Random(1))
-    assert found == ["In Österreich", "bei Konzerten", "im Freien"]
-    assert "Diese Einschränkungen müssen erhalten bleiben: In Österreich; bei Konzerten; im Freien" in \
-        seen[0]["messages"][1]["content"]
-    assert "In Österreich; im Freien" in seen[1]["messages"][-1]["content"]
-    assert result == good
-    assert "Einschränkung fehlt: In Österreich; bei Konzerten; im Freien" in h.warnings(para, "Kurz. Anders.", found)
 
 
 def test_verrutschte_quelle():
@@ -937,17 +898,153 @@ def test_strenge_bauplaene():
     assert example == "" and all(n >= 5 for n in plan)
 
 
-def test_floskel_loest_nachbesserung_aus_und_steht_rot_da(scripted_ollama):
-    url, replies, seen = scripted_ollama
-    para = "Die Technik hilft den Veranstaltern bei der Planung sehr. Sie senkt außerdem die laufenden Kosten deutlich."
-    clean = "Bei der Planung hilft den Veranstaltern die Technik sehr, und die laufenden Kosten senkt sie deutlich. Außerdem."
-    replies += ["Die Technik spielt eine zentrale Rolle bei der Planung der Veranstalter. Sie senkt die laufenden Kosten deutlich.",
-                clean, clean]
-    h.humanize_checked(para, "Akademisch", "m", url, [])
-    assert len(seen) >= 2 and "verbotenen Wendungen" in seen[1]["messages"][-1]["content"]
-    assert 'Floskel: "spielt eine … Rolle"' in h.warnings(para, "Das spielt eine große Rolle für alle hier.")
-
-
 def test_einschraenkung_ohne_abgeschnittenes_wort():
     assert h.extract_qualifiers("Laut dem Verband für Licht- und Bühnentechnik nutzen in Deutschland 90 % DMX.") == \
         ["in Deutschland"]
+
+
+
+# --- Entwurf, dann gezielt reparieren ---
+def stub_chat(monkeypatch, drafts: dict, retry: str = "", repair=lambda sentence: "Nein."):
+    """Ersetzt das Modell: Entwürfe nach Stichwort im Absatz, eine Antwort für den zweiten Entwurf, eine Funktion
+    für Satz-Reparaturen. Liefert die Liste aller Aufrufe."""
+    calls = []
+
+    def chat(model, url, messages):
+        calls.append(messages)
+        user = messages[-1]["content"]
+        if len(messages) > 2:
+            return retry
+        if "Bauplan" in user:
+            return next(v for k, v in drafts.items() if k in user)
+        return repair(user.split(": ", 1)[-1] if "Sätze: " in user else user.split("Satz: ", 1)[-1])
+
+    monkeypatch.setattr(h, "_chat", chat)
+    return calls
+
+
+GOOD = ("Bei 50.000 Gästen verursachen Licht und Ton bis zu 1,2 Gigawattstunden (vgl. Hofer 2019, S. 112), was den "
+        "Energieverbrauch der Technik zum Thema macht. Dank LED fällt der Verbrauch um etwa 60 % geringer aus.")
+
+
+def test_rohe_saetze_und_ein_tag():
+    text = "Das gilt z. B. hier (vgl. Berger 2021, S. 45). Am 28.09.2026 kam es. Kurz!"
+    assert h.raw_sentences(text) == ["Das gilt z. B. hier (vgl. Berger 2021, S. 45).", "Am 28.09.2026 kam es.", "Kurz!"]
+    assert " ".join(h.raw_sentences(text)) == text
+    source = "Der Aufbau dauert 1 Tag bei 60 km/h auf 18 Metern (vgl. Bauer 2019, S. 88)."
+    assert h.missing_facts(source, "Einen Tag dauert der Aufbau bei 60 km/h auf 18 Meter.") == []
+    assert h.missing_facts(source, "Der Aufbau dauert lange bei 60 km/h auf 18 Metern.") == ["1 Tag"]
+
+
+def test_humanize_checked_absatzweise(monkeypatch):
+    second = "Mit einem kurzen Konzert beginnt am Abend das Festival. Bis tief in die Nacht spielen danach mehrere Bands, und das Publikum tanzt."
+    stub_chat(monkeypatch, {"Energieverbrauch": GOOD, "Festival beginnt": second}, retry=GOOD)
+    steps = []
+    text = "Überschrift ohne Punkt\n\n" + PARA + "\n\n" + LONG
+    result, passes, _ = h.humanize_checked(text, "Akademisch", "m", "u", [], progress=lambda d, t: steps.append((d, t)))
+    parts = h.paragraphs(result)
+    assert parts[0] == "Überschrift ohne Punkt" and parts[1].startswith("Bei 50.000") and parts[2] == second
+    assert steps == [(1, 2), (2, 2)] and passes >= 1
+
+
+def test_grober_entwurf_wird_einmal_neu_angesetzt(monkeypatch):
+    calls = stub_chat(monkeypatch, {"Energieverbrauch": "Kaputt ohne Zahlen. Wirklich."}, retry=GOOD)
+    pool = [(36, [17, 6, 13], "Ein echter Absatz als Vorbild.")]
+    result, extra, found = h.rewrite_paragraph(PARA, "Akademisch", "m", "u", pool, rng=random.Random(1))
+    assert "1,2 Gigawattstunden (vgl. Hofer 2019, S. 112)" in result and "60 %" in result and extra >= 1
+    assert "<beispiel>\nEin echter Absatz als Vorbild.\n</beispiel>" in calls[0][0]["content"]
+    assert "Bauplan: genau 3 Sätze" in calls[0][1]["content"]
+    assert calls[1][2]["content"] == "Kaputt ohne Zahlen. Wirklich." and "passt noch nicht" in calls[1][3]["content"]
+
+
+def test_einschraenkungen_stehen_im_auftrag(monkeypatch):
+    para = ("In Österreich gilt bei Konzerten im Freien häufig ein Richtwert von 100 dB(A). "
+            "Gleichzeitig müssen Anrainer vor Lärm geschützt werden.")
+    draft = "Anrainer brauchen Schutz vor Lärm. Bei Konzerten im Freien gilt in Österreich oft ein Richtwert von 100 dB(A)."
+    calls = stub_chat(monkeypatch, {"Österreich": draft}, retry=draft)
+    result, _, found = h.rewrite_paragraph(para, "Akademisch", "m", "u", [], rng=random.Random(1))
+    assert found == ["In Österreich", "bei Konzerten", "im Freien"]
+    assert "Diese Einschränkungen müssen erhalten bleiben: In Österreich; bei Konzerten; im Freien" in calls[0][1]["content"]
+    assert "100 dB(A)" in result
+    assert "Einschränkung fehlt: In Österreich; bei Konzerten; im Freien" in h.warnings(para, "Kurz. Anders.", found)
+
+
+def test_satz_mit_floskel_wird_einzeln_repariert(monkeypatch):
+    para = "Die Technik hilft den Veranstaltern bei der Planung sehr. Sie senkt außerdem die laufenden Kosten deutlich."
+    draft = ("Die Technik spielt eine zentrale Rolle bei der Planung der Veranstalter. Deutlich niedriger fallen "
+             "außerdem die laufenden Kosten aus.")
+    calls = stub_chat(monkeypatch, {"Technik": draft}, retry=draft,
+                      repair=lambda sentence: "Den Veranstaltern nimmt die Technik bei der Planung viel Arbeit ab.")
+    result, extra, _ = h.rewrite_paragraph(para, "Akademisch", "m", "u", [], rng=random.Random(1))
+    assert "spielt eine" not in result and "nimmt die Technik" in result and extra >= 1
+    repair_calls = [c for c in calls if c[0]["content"] == h.REPAIR_SYSTEM]
+    assert "Vermeide diese Wendungen" in repair_calls[0][1]["content"] and "spielt eine" in repair_calls[0][1]["content"]
+    assert 'Floskel: "spielt eine … Rolle"' in h.warnings(para, "Das spielt eine große Rolle für alle hier.")
+
+
+def test_reparatur_wird_nur_bei_verbesserung_angenommen(monkeypatch):
+    source = "Es kamen 50.000 Gäste nach Wien (vgl. Hofer 2019, S. 112). Die Stimmung war gut."
+    sentence = "Somit kamen 50.000 Gäste nach Wien (vgl. Hofer 2019, S. 112)."
+    for bad in ["Viele Gäste kamen nach Wien (vgl. Hofer 2019, S. 112).",          # Zahl verloren
+                "Es kamen 50.000 Gäste nach Wien.",                                 # Quelle verloren
+                "Es kamen 50.000 Gäste und 300 Helfer nach Wien (vgl. Hofer 2019, S. 112).",  # Zahl erfunden
+                "Somit reisten 50.000 Gäste nach Wien an (vgl. Hofer 2019, S. 112)."]:  # Floskel noch da
+        stub_chat(monkeypatch, {}, repair=lambda s, bad=bad: bad)
+        assert h.repair_sentences(source, [sentence], "m", "u", []) == ([sentence], 0)
+    better = "Nach Wien reisten 50.000 Gäste an (vgl. Hofer 2019, S. 112)."
+    stub_chat(monkeypatch, {}, repair=lambda s: better)
+    assert h.repair_sentences(source, [sentence], "m", "u", []) == ([better], 1)
+
+
+def test_satz_probleme():
+    source = "Das Personal wird geschult. Die Verordnung erlaubt 2 Personen pro Quadratmeter."
+    issues = h.sentence_issues(source, "Das Personal wird geschult, obwohl das eine entscheidende Rolle spielt.")
+    assert issues["verknüpfung"] == ["obwohl"] and "entscheidende rolle" in issues["floskel"]
+    assert h.sentence_issues(source, "Das Personal wird geschult.") == {"wörtlich": ["Das Personal wird geschult."]}
+    assert h.sentence_issues(source, "Geschult werden alle Leute im Team.") == {}
+
+
+def test_streichen_ohne_modell():
+    source = "Die Technik ist entscheidend für den Abend. LED senkt den Verbrauch um 60 %."
+    parts = ["Entscheidend für den Abend ist die Technik.", "Das gilt für alle Bereiche.", "60 %.",
+             "LED senkt den Verbrauch um 60 %."]
+    assert h.drop_unfounded(source, parts, strict=True) == [parts[0], parts[3]]
+    assert h.drop_unfounded(source, parts, strict=False) == [parts[0], parts[2], parts[3]]
+    assert h.drop_unfounded(source, ["Entscheidend ist die Technik.", "60 %."], strict=True) == \
+        ["Entscheidend ist die Technik.", "60 %."]  # das Fragment trägt die einzige 60 %
+    assert h.drop_unfounded(source, ["Ganz andere Dinge passieren woanders."], strict=True) == \
+        ["Ganz andere Dinge passieren woanders."]  # nie alles streichen
+
+
+def test_fakten_garantie():
+    source = ("Die Technik ist wichtig für den Abend. Es kamen 50.000 Gäste nach Wien (vgl. Hofer 2019, S. 112). "
+              "LED senkt den Verbrauch um 60 %.")
+    originals = h.raw_sentences(source)
+    lost, n = h.restore_facts(source, ["Wichtig für den Abend ist die Technik.", "Viele Gäste kamen nach Wien.",
+                                       "LED senkt den Verbrauch deutlich."])
+    assert lost == ["Wichtig für den Abend ist die Technik.", originals[1], originals[2]] and n == 2
+    invented, _ = h.restore_facts(source, ["Wichtig ist die Technik.", "Nach Wien kamen 50.000 Gäste (vgl. Hofer 2019, S. 112).",
+                                           "LED senkt den Verbrauch um 60 %, 21 Menschen starben."])
+    assert not h.added_facts(source, " ".join(invented)) and not h.missing_facts(source, " ".join(invented))
+    moved, _ = h.restore_facts(source, ["Wichtig für den Abend ist die Technik (vgl. Hofer 2019, S. 112).",
+                                        "Nach Wien kamen 50.000 Gäste.", "Um 60 % senkt LED den Verbrauch."])
+    text = " ".join(moved)
+    assert not h.misplaced_citations(source, text) and not h.missing_citations(source, text)
+    fine = ["Wichtig für den Abend ist die Technik.", "Nach Wien kamen 50.000 Gäste (vgl. Hofer 2019, S. 112).",
+            "Um 60 % senkt LED den Verbrauch."]
+    assert h.restore_facts(source, list(fine)) == (fine, 0)
+
+
+def test_rhythmus_schritt(monkeypatch):
+    source = ("Die Halle öffnet am frühen Abend ihre Türen. Die Gäste suchen sich dann ihre Plätze. "
+              "Die Musik beginnt kurz darauf sehr leise. Die Technik prüft dabei noch die Anlage.")
+    parts = ["Am frühen Abend öffnet die Halle ihre Türen.", "Dann suchen sich die Gäste ihre Plätze.",
+             "Kurz darauf beginnt sehr leise die Musik.", "Dabei prüft die Technik noch die Anlage."]
+    merged = "Kurz darauf beginnt sehr leise die Musik, und die Technik prüft dabei noch die Anlage."
+    stub_chat(monkeypatch, {}, repair=lambda s: merged)
+    out, n = h.vary_rhythm(source, list(parts), "m", "u", [])
+    assert n == 1 and len(out) == 3 and merged in out
+    stub_chat(monkeypatch, {}, repair=lambda s: "Die Musik beginnt, obwohl die Technik noch die Anlage prüft und 40 Leute fehlen.")
+    assert h.vary_rhythm(source, list(parts), "m", "u", []) == (parts, 0)
+    varied = ["Kurz gesagt.", "Am frühen Abend öffnet die Halle ihre Türen und die Gäste suchen sich in aller Ruhe ihre Plätze.", "Dann Musik."]
+    assert h.vary_rhythm(source, varied, "m", "u", []) == (varied, 0)

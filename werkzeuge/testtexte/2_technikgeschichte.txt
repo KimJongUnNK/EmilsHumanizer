@@ -1,0 +1,13 @@
+Stil: Akademisch
+
+Die Entwicklung der Veranstaltungstechnik im 20. Jahrhundert
+
+In der heutigen Zeit ist professionelle Veranstaltungstechnik aus dem Kulturbetrieb nicht mehr wegzudenken. Ihre Entwicklung im 20. Jahrhundert spielt eine entscheidende Rolle für das Verständnis moderner Bühnenproduktionen. Darüber hinaus zeigt sich, dass technische Innovationen stets eng mit gesellschaftlichen Veränderungen verknüpft waren (vgl. Müller 2018, S. 23).
+
+Ein zentraler Meilenstein war die Elektrifizierung der Bühnenbeleuchtung. Bereits 1881 wurde im Savoy Theatre in London erstmals eine vollständig elektrische Bühnenbeleuchtung mit rund 1.200 Glühlampen eingesetzt. In Wien folgte das Burgtheater im Jahr 1888. Es ist wichtig zu beachten, dass die neue Technik nicht nur die Sicherheit erhöhte, sondern auch völlig neue gestalterische Möglichkeiten eröffnete (vgl. Huber 2015, S. 67).
+
+Des Weiteren veränderte die Beschallungstechnik die Durchführung von Großveranstaltungen grundlegend. Beim Woodstock-Festival im August 1969 kam eine Beschallungsanlage mit einer Gesamtleistung von etwa 10.000 Watt zum Einsatz, die für damalige Verhältnisse außergewöhnlich war. In Europa setzten sich vergleichbare Systeme erst in den 1970er-Jahren durch. Zusammenfassend lässt sich festhalten, dass die Leistungsfähigkeit der Tontechnik maßgeblich zur Entstehung des modernen Festivalformats beitrug.
+
+Im Hinblick auf die Steuerungstechnik ist festzustellen, dass die Einführung des DMX512-Protokolls im Jahr 1986 einen entscheidenden Wendepunkt darstellte. Das Protokoll ermöglicht die Steuerung von bis zu 512 Kanälen über eine einzige Leitung. Laut einer Erhebung des Verbands für Licht- und Bühnentechnik nutzen heute über 90 % der professionellen Bühnen in Deutschland und Österreich DMX-basierte Systeme (vgl. VLB 2022, S. 14).
+
+Abschließend lässt sich sagen, dass die Geschichte der Veranstaltungstechnik ein facettenreiches Zusammenspiel von Technik, Kunst und Wirtschaft darstellt. Wer moderne Events plant, sollte diese Entwicklung kennen. Letztendlich zeigt sich: Technischer Fortschritt und künstlerische Gestaltung sind keine Gegensätze, sondern bedingen einander.

@@ -653,8 +653,9 @@ def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[st
     for sentence in repeated_sentences(result):
         found.append(f'Dieser Satz wiederholt, was schon dasteht, streich ihn oder sag etwas anderes: "{sentence[:70]}…"')
     for word, extra, where in new_connectors(source, result):
-        kind = "einen Gegensatz" if word in CONNECTORS["Gegensatz"] else "eine Folge"
-        found.append(f'Mit "{word}" behauptest du {kind}, den die Vorlage nicht nennt: ' +
+        kind = ("einen Gegensatz, den" if word in CONNECTORS["Gegensatz"] else
+                "eine Folge, die" if word in CONNECTORS["Folge"] else "einen Grund, den")
+        found.append(f'Mit "{word}" behauptest du {kind} die Vorlage nicht nennt: ' +
                      " / ".join(f'"{s[:80]}…"' for s in where[:3]) +
                      ". Verbinde diese Aussagen neutral oder lass zwei Sätze stehen.")
     for sentence in unsupported_sentences(source, result):
@@ -720,7 +721,7 @@ def sentence_issues(source: str, sentence: str) -> dict[str, list[str]]:
     issues = {
         "floskel": [t for t in AI_TELLS if t in low] + habits(sentence),
         "wörtlich": unchanged_sentences(source, sentence)[:1],
-        "verknüpfung": [w for words in CONNECTORS.values() for w in words
+        "verknüpfung": [connector_name(w) for words in CONNECTORS.values() for w in words
                         if re.search(r"\b%s\b" % w, sentence, re.I) and not re.search(r"\b%s\b" % w, source, re.I)],
     }
     return {k: v for k, v in issues.items() if v}
@@ -876,6 +877,28 @@ def restore_facts(source: str, parts: list[str], complete: bool = False) -> tupl
     return parts, changes
 
 
+def split_longest(source: str, parts: list[str], model: str, url: str, qualifiers: list[str], spread) -> tuple[list[str], int]:
+    """Teilt den längsten Satz in einen kurzen und einen längeren, wenn Zusammenlegen nicht hilft."""
+    lengths = [len(p.split()) for p in parts]
+    i = lengths.index(max(lengths))
+    if lengths[i] < 22:
+        return parts, 0
+    request = ("Teile diesen Satz in genau zwei Sätze: einen kurzen mit höchstens 8 Wörtern und einen längeren. "
+               "Beide sind vollständige Sätze. Kein \"obwohl\", \"sodass\", \"daher\", \"weil\", \"da\". Alle Zahlen und "
+               "Quellenangaben bleiben wörtlich.\n\nSatz: " + parts[i])
+    try:
+        reply = clean_reply(_chat(model, url, [{"role": "system", "content": REPAIR_SYSTEM},
+                                               {"role": "user", "content": request}]))
+    except OllamaError:
+        return parts, 0
+    pieces = raw_sentences(reply)
+    new_lengths = lengths[:i] + [len(p.split()) for p in pieces] + lengths[i + 1:]
+    fine = (len(pieces) == 2 and not fragments(reply) and keeps_content(source, parts[i], reply, qualifiers)
+            and spread(new_lengths) > spread(lengths)
+            and issue_score(sentence_issues(source, reply)) <= issue_score(sentence_issues(source, parts[i])))
+    return (parts[:i] + pieces + parts[i + 1:], 1) if fine else (parts, 0)
+
+
 def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers: list[str]) -> tuple[list[str], int]:
     """Sind die Sätze eines Absatzes zu gleich lang, werden die zwei Nachbarn zusammengelegt, bei denen das am
     meisten bringt. Angenommen wird das nur, wenn nichts verloren geht und kein neuer Zusammenhang behauptet wird."""
@@ -883,16 +906,16 @@ def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers:
         return burstiness(" ".join("x " * (n - 1) + "x." for n in lengths))
 
     lengths = [len(p.split()) for p in parts]
-    if len(parts) < 3 or spread(lengths) >= 0.45:
+    if len(parts) < 2 or spread(lengths) >= 0.45:
         return parts, 0
     options = [(spread(lengths[:i] + [lengths[i] + lengths[i + 1]] + lengths[i + 2:]), i)
-               for i in range(len(parts) - 1) if lengths[i] + lengths[i + 1] <= 45]
+               for i in range(len(parts) - 1) if lengths[i] + lengths[i + 1] <= 45] if len(parts) >= 3 else []
     if not options or max(options)[0] <= spread(lengths):
-        return parts, 0
+        return split_longest(source, parts, model, url, qualifiers, spread)
     i = max(options)[1]
     pair = parts[i] + " " + parts[i + 1]
     request = ("Verbinde diese zwei Sätze zu einem einzigen Satz. Verbinde neutral: mit \"und\", einem Relativsatz, "
-               "einem Doppelpunkt oder einem Semikolon. Kein \"obwohl\", \"sodass\", \"daher\", \"weil\". Alle Zahlen und "
+               "einem Doppelpunkt oder einem Semikolon. Kein \"obwohl\", \"sodass\", \"daher\", \"weil\", \"da\". Alle Zahlen und "
                "Quellenangaben bleiben wörtlich.\n\nSätze: " + pair)
     try:
         merged = clean_reply(_chat(model, url, [{"role": "system", "content": REPAIR_SYSTEM},
@@ -1055,7 +1078,13 @@ def core_stems(text: str) -> set[str]:
 CONNECTORS = {
     "Gegensatz": ["obwohl", "obgleich", "obschon", "trotzdem", "dennoch", "jedoch", "allerdings", "wenngleich"],
     "Folge": ["sodass", "wodurch", "daher", "deshalb", "deswegen", "folglich", "somit", "weshalb", "infolgedessen"],
+    # "da" nur als Bindewort nach Komma, sonst träfe es jedes "da ist"
+    "Grund": ["weil", "denn", "(?<=, )da"],
 }
+
+
+def connector_name(pattern: str) -> str:
+    return re.sub(r"\(.*?\)", "", pattern)
 
 
 def new_connectors(source: str, result: str) -> list[tuple[str, int, list[str]]]:
@@ -1069,7 +1098,7 @@ def new_connectors(source: str, result: str) -> list[tuple[str, int, list[str]]]
             pattern = re.compile(r"\b%s\b" % word, re.I)
             extra = len(pattern.findall(result)) - len(pattern.findall(source))
             if extra > 0:
-                found.append((word, extra, [s for s in sentences(result) if pattern.search(s)]))
+                found.append((connector_name(word), extra, [s for s in sentences(result) if pattern.search(s)]))
     return found
 
 

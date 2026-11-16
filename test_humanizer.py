@@ -1067,3 +1067,21 @@ def test_ordnungszahl_und_relativsatz():
     assert len(h.sentences("Die Technik im 20. Jahrhundert war neu. Das stimmt.")) == 2
     assert h.extract_qualifiers("Üblich sind Laufzeiten, in denen Leistungen festgelegt werden, in kleinen Gemeinden.") == \
         ["in kleinen Gemeinden"]
+
+
+def test_grund_verknuepfungen_und_teilen(monkeypatch):
+    source = "Das Savoy Theatre führte 1881 elektrisches Licht ein. Das Burgtheater folgte im Jahr 1888."
+    linked = "Die Bühne wurde heller, da das Savoy Theatre 1881 elektrisches Licht einführte, denn das Burgtheater folgte 1888."
+    assert [w for w, _, _ in h.new_connectors(source, linked)] == ["denn", "da"]
+    assert h.sentence_issues(source, linked)["verknüpfung"] == ["denn", "da"]
+    assert h.new_connectors(source, "Da ist das Licht, und da war es schon 1881 und 1888.") == []
+    long = ("Das Savoy Theatre in London führte 1881 als erstes Haus elektrisches Licht auf der ganzen Bühne ein, "
+            "und das Burgtheater in Wien folgte diesem Beispiel im Jahr 1888.")
+    parts = ["Elektrisches Licht veränderte nach und nach die Arbeit auf den großen Bühnen in ganz Europa sehr stark.", long]
+    pieces = "Das Burgtheater in Wien folgte 1888. Das Savoy Theatre in London führte 1881 als erstes Haus elektrisches Licht auf der ganzen Bühne ein."
+    stub_chat(monkeypatch, {}, repair=lambda s: pieces)
+    src = source + " Elektrisches Licht veränderte die Arbeit auf den Bühnen in Europa."
+    out, n = h.vary_rhythm(src, list(parts), "m", "u", [])
+    assert n == 1 and len(out) == 3
+    stub_chat(monkeypatch, {}, repair=lambda s: "1888. Das Savoy Theatre führte 1881 Licht ein und das Burgtheater in Wien folgte.")
+    assert h.vary_rhythm(src, list(parts), "m", "u", []) == (parts, 0)

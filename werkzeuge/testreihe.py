@@ -18,9 +18,9 @@ import humanizer as h  # noqa: E402
 def check(source: str, out: str, style: str) -> dict:
     """Jedes Kriterium als (Messwert, bestanden)."""
     strict = style == "Akademisch"
-    src_paras = [p for p in h.paragraphs(source) if h.needs_rewrite(p)]
-    out_paras = [p for p in h.paragraphs(out) if h.needs_rewrite(p)]
-    pairs = list(zip(src_paras, out_paras))
+    # Absätze gleicher Position gehören zusammen; Überschriften und Einzeiler der Vorlage bleiben außen vor.
+    pairs = [(a, b) for a, b in zip(h.paragraphs(source), h.paragraphs(out)) if h.needs_rewrite(a)]
+    src_paras = [a for a, _ in pairs]
     qualifiers = [q for p in src_paras for q in h.extract_qualifiers(p)]
     count = max(len(h.sentences(out)), 1)
     ratio = len(out.split()) / max(len(source.split()), 1)

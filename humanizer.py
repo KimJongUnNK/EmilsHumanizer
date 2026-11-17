@@ -107,7 +107,8 @@ ABBREVIATIONS = re.compile(
     r"\b(z\.\s?B|d\.\s?h|u\.\s?a|o\.\s?ä|u\.\s?U|bzw|bspw|usw|ca|Nr|vgl|etc|evtl|ggf|inkl|exkl|sog|Dr|Prof|Abb|Mio|Mrd|St|"
     r"S|Abs|Kap|Aufl|Hrsg|hrsg|Bd|Jg|Jh|Tab|ebd|Ebd|ders|f|ff|al|Std|Min|Mag|Ing|Dipl|Fa|Tel|Str|vs)\."
 )
-NUMBER_DOT = re.compile(rf"(\d)\.(?=\d|\s+[a-zäöü]|\s+(?:{MONTHS})\b)")
+ORDINAL_NOUNS = "Jahrhundert|Jahrtausend|Auflage|Klasse|Platz|Mal|Stock|Bezirk|Semester|Kapitel|Quartal|Lebensjahr"
+NUMBER_DOT = re.compile(rf"(\d)\.(?=\d|\s+[a-zäöü]|\s+(?:{MONTHS}|{ORDINAL_NOUNS})\w*\b)")
 
 BG, PANEL, FG, MUTED, ACCENT = "#141414", "#232323", "#f2f2f2", "#9a9a9a", "#ff4b4b"
 ADDED, REMOVED = "#1f4d2e", "#5a2326"
@@ -117,6 +118,14 @@ GOOD = "#5fd38d"
 def _mask(text: str) -> str:
     """Nimmt die Punkte aus Abkürzungen und Datumsangaben, damit sie kein Satzende vortäuschen."""
     return NUMBER_DOT.sub(r"\1", ABBREVIATIONS.sub(lambda m: m.group(1).replace(".", ""), text))
+
+
+def raw_sentences(text: str) -> list[str]:
+    """Wie sentences(), aber unverändert im Wortlaut, damit sich ein Text aus den Sätzen wieder zusammensetzen lässt."""
+    keep = "\u2024"  # Platzhalter gleicher Länge für Punkte, die kein Satzende sind
+    masked = ABBREVIATIONS.sub(lambda m: m.group(0).replace(".", keep), text)
+    masked = NUMBER_DOT.sub(lambda m: m.group(1) + keep, masked)
+    return [part.replace(keep, ".") for part in re.split(r"(?<=[.!?…])\s+", masked.strip()) if part]
 
 
 def sentences(text: str) -> list[str]:
@@ -531,16 +540,17 @@ def plan_pool(source: str, style: str, own: list[str], pool_of=group_pool) -> tu
     return pool, note
 
 
-def fallback_plan(words: int) -> list[int]:
+def fallback_plan(words: int, strict: bool = False) -> list[int]:
     """Bauplan ohne Vorbild: lang, kurz, mittel, sehr lang, kurz … bis die Wortzahl erreicht ist."""
     shape, plan = [1.7, 0.6, 1.0, 2.1, 0.8, 1.3], []
-    unit = max(words / 7, 4)
+    unit, least = max(words / 7, 4), 5 if strict else 3
     while sum(plan) < words * 0.9:
-        plan.append(max(3, round(shape[len(plan) % len(shape)] * unit)))
+        plan.append(max(least, round(shape[len(plan) % len(shape)] * unit)))
     return plan
 
 
-def sentence_plan(paragraph: str, pool: list, rng: random.Random | None = None) -> tuple[list[int], str]:
+def sentence_plan(paragraph: str, pool: list, rng: random.Random | None = None,
+                  strict: bool = False) -> tuple[list[int], str]:
     """Abfolge von Satzlängen für einen Absatz, abgenommen von einem echten Absatz ähnlicher Länge.
 
     Die Längen werden auf die Wortzahl des Originalabsatzes skaliert. Zurück kommen Bauplan und Vorbild-Absatz,
@@ -552,15 +562,30 @@ def sentence_plan(paragraph: str, pool: list, rng: random.Random | None = None) 
     rng.shuffle(candidates)
     for total, lengths, example in candidates[:60]:
         plan = [max(3, round(n * words / total)) for n in lengths]
-        if usable_plan(plan):
+        if usable_plan(plan, strict):
             return plan, example
-    return fallback_plan(words), ""
+    return fallback_plan(words, strict), ""
 
 
-def usable_plan(plan: list[int]) -> bool:
-    """Abwechslungsreich, aber kein Extrem: 4 bis 45 Wörter pro Satz, höchstens ein sehr kurzer."""
-    return (len(plan) >= 2 and all(3 <= n <= 45 for n in plan) and sum(n < 6 for n in plan) <= 1
+def usable_plan(plan: list[int], strict: bool = False) -> bool:
+    """Abwechslungsreich, aber kein Extrem: höchstens 45 Wörter pro Satz und höchstens ein sehr kurzer.
+
+    Streng (akademischer Stil) heißt: jeder Satz mindestens 5 Wörter, höchstens einer unter 8. Sonst verlangt der
+    Bauplan Sätze aus zwei Wörtern, und das Modell schreibt Fragmente wie "38 %.".
+    """
+    least, short = (5, 8) if strict else (3, 6)
+    return (len(plan) >= 2 and all(least <= n <= 45 for n in plan) and sum(n < short for n in plan) <= 1
             and burstiness(" ".join("x " * (n - 1) + "x." for n in plan)) >= 0.35)
+
+
+def fragments(text: str) -> list[str]:
+    """Sätze, die keine sind: höchstens zwei Wörter oder weniger als zwei Wörter aus Buchstaben, etwa "38 %."."""
+    found = []
+    for sentence in sentences(text):
+        words = sentence.split()
+        if len(words) <= 2 or len([w for w in words if re.search(r"[A-Za-zÄÖÜäöüß]{2}", w)]) < 2:
+            found.append(sentence)
+    return found
 
 
 def plan_fit(plan: list[int], result: str) -> float:
@@ -611,14 +636,13 @@ def paragraph_request(paragraph: str, plan: list[int], avoid: list[str] | None =
                + "; ".join(required) + "\n" if required else "")
             + ("Diese Einschränkungen müssen erhalten bleiben: " + "; ".join(qualifiers) + "\n" if qualifiers else "")
             + claims
-            + ("Diese Wendungen stehen schon in früheren Absätzen, verwende sie hier nicht: " + ", ".join(avoid) + "\n"
-               if avoid else "")
+            + ("Diese Wendungen sind verboten: " + ", ".join(avoid) + "\n" if avoid else "")
             + "Füge nichts hinzu, was nicht im Absatz steht.\n\n"
             f"Absatz:\n{paragraph}")
 
 
 def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[str] | None = None,
-                       qualifiers: list[str] | None = None) -> list[str]:
+                       qualifiers: list[str] | None = None, strict: bool = False) -> list[str]:
     found = []
     lost = missing_qualifiers(qualifiers or [], result)
     if lost:
@@ -629,15 +653,19 @@ def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[st
     for sentence in repeated_sentences(result):
         found.append(f'Dieser Satz wiederholt, was schon dasteht, streich ihn oder sag etwas anderes: "{sentence[:70]}…"')
     for word, extra, where in new_connectors(source, result):
-        kind = "einen Gegensatz" if word in CONNECTORS["Gegensatz"] else "eine Folge"
-        found.append(f'Mit "{word}" behauptest du {kind}, den die Vorlage nicht nennt: ' +
+        kind = ("einen Gegensatz, den" if word in CONNECTORS["Gegensatz"] else
+                "eine Folge, die" if word in CONNECTORS["Folge"] else "einen Grund, den")
+        found.append(f'Mit "{word}" behauptest du {kind} die Vorlage nicht nennt: ' +
                      " / ".join(f'"{s[:80]}…"' for s in where[:3]) +
                      ". Verbinde diese Aussagen neutral oder lass zwei Sätze stehen.")
     for sentence in unsupported_sentences(source, result):
         found.append(f'Dieser Satz hat keine Grundlage in der Vorlage, streich ihn: "{sentence}"')
     repeated = [h for h in habits(result) if h in (avoid or [])]
     if repeated:
-        found.append("Diese Wendungen stehen schon in früheren Absätzen, formuliere hier anders: " + ", ".join(repeated) + ".")
+        found.append("Diese verbotenen Wendungen stehen noch drin, formuliere anders: " + ", ".join(repeated) + ".")
+    if strict:
+        for fragment in fragments(result):
+            found.append(f'Das ist kein vollständiger Satz: "{fragment}". Bau ihn in einen Nachbarsatz ein.')
     added = added_facts(source, result)
     if added:
         found.append("Diese Angaben stehen nicht in der Vorlage und müssen raus: " + ", ".join(added) + ".")
@@ -668,7 +696,7 @@ def paragraph_problems(source: str, result: str, plan: list[int], avoid: list[st
 
 
 def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str] | None = None,
-                      qualifiers: list[str] | None = None) -> float:
+                      qualifiers: list[str] | None = None, strict: bool = False) -> float:
     words, target = len(result.split()), len(source.split())
     fidelity = 20 * len(missing_qualifiers(qualifiers or [], result)) + 25 * len(misplaced_citations(source, result)) \
         + 10 * len(repeated_sentences(result)) + 20 * sum(extra for _, extra, _ in new_connectors(source, result)) \
@@ -678,7 +706,8 @@ def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str
     return (25 * (len(missing_facts(source, result)) + len(added_facts(source, result))
                   + len(missing_citations(source, result)) + len(doubled_citations(source, result)))
             + off + 15 * min(plan_fit(plan, result), 1.0) + 18 * len(unchanged_sentences(source, result))
-            + 5 * tell_count(result) + 5 * len(crutches(result)) + 5 * repeated + fidelity)
+            + 12 * tell_count(result) + 5 * len(crutches(result)) + 12 * repeated + fidelity
+            + (25 * len(fragments(result)) if strict else 0))
 
 
 def flatten(paragraph: str) -> str:
@@ -686,32 +715,315 @@ def flatten(paragraph: str) -> str:
     return re.sub(r"\s*\n+\s*", " ", paragraph).strip()
 
 
-def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 2,
-                      rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
-    """Schreibt einen Absatz nach Bauplan um und wiederholt bis zu retries-mal mit konkreter Rückmeldung.
+def sentence_issues(source: str, sentence: str) -> dict[str, list[str]]:
+    """Was an einem einzelnen Satz der Ausgabe zu reparieren ist: Floskeln, wörtliche Übernahme, neue Verknüpfung."""
+    low = sentence.lower()
+    issues = {
+        "floskel": [t for t in AI_TELLS if t in low] + habits(sentence),
+        "wörtlich": unchanged_sentences(source, sentence)[:1],
+        "verknüpfung": [connector_name(w) for words in CONNECTORS.values() for w in words
+                        if re.search(r"\b%s\b" % w, sentence, re.I) and not re.search(r"\b%s\b" % w, source, re.I)],
+    }
+    return {k: v for k, v in issues.items() if v}
 
-    Vorher sucht die App die Einschränkungen des Absatzes heraus (Orte, Zeiträume, Gruppen), die erhalten bleiben
-    müssen. Zurück kommen die beste Fassung, die Zahl der Nachbesserungen und diese Einschränkungen.
+
+def issue_score(issues: dict[str, list[str]]) -> int:
+    return len(issues.get("floskel", [])) + 2 * len(issues.get("wörtlich", [])) + 2 * len(issues.get("verknüpfung", []))
+
+
+REPAIR_SYSTEM = ("Du formulierst einzelne deutsche Sätze um. Du gibst nur den neuen Satz aus, ohne Kommentar und ohne "
+                 "Anführungszeichen. Du fügst keine Information hinzu und lässt keine weg. Zahlen, Namen und "
+                 "Quellenangaben in Klammern bleiben Zeichen für Zeichen gleich.")
+
+
+def repair_request(sentence: str, issues: dict[str, list[str]]) -> str:
+    lines = []
+    if "floskel" in issues:
+        lines.append("Vermeide diese Wendungen: " + ", ".join(issues["floskel"]) + ". Sag konkret, was gemeint ist.")
+    if "wörtlich" in issues:
+        lines.append("Der Satz ist fast unverändert aus einer Vorlage übernommen. Stell ihn um: beginne mit einem "
+                     "anderen Satzteil, wähle andere Verben und Wörter. Der Inhalt bleibt gleich.")
+    if "verknüpfung" in issues:
+        lines.append("Die Wörter " + ", ".join(f'"{w}"' for w in issues["verknüpfung"]) + " behaupten einen "
+                     "Zusammenhang, der nicht belegt ist. Verbinde die Aussagen neutral (mit \"und\", Relativsatz oder "
+                     "Doppelpunkt) oder mach zwei Sätze daraus.")
+    keep = list(dict.fromkeys(CITATION.findall(sentence) + [surface for _, _, surface in facts(sentence)]))
+    if keep:
+        lines.append("Diese Angaben bleiben wörtlich: " + "; ".join(keep))
+    return "Formuliere diesen Satz neu.\n" + "\n".join(lines) + "\n\nSatz: " + sentence
+
+
+def keeps_content(source: str, old: str, new: str, qualifiers: list[str], loose: bool = False) -> bool:
+    """Trägt die neue Fassung alles, was die alte trug, und nichts, was die Vorlage nicht hat?
+    loose erlaubt mehr Spielraum bei der Länge, an Zahlen, Quellen und Einschränkungen ändert es nichts."""
+    carried = [q for q in qualifiers if core_stems(q) <= core_stems(old)]
+    low, high = (0.5, 2.0 * len(old.split()) + 4) if loose else (0.6, 1.6 * len(old.split()) + 3)
+    return (bool(new.strip())
+            and low * len(old.split()) <= len(new.split()) <= high
+            and not missing_facts(old, new) and all(c in new for c in CITATION.findall(old))
+            and not added_facts(source, new) and not unsupported_sentences(source, new)
+            and not missing_qualifiers(carried, new))
+
+
+def clean_reply(reply: str) -> str:
+    reply = flatten(reply)
+    reply = re.sub(r"^(?:Satz|Neuer Satz|Umformulierung)\s*:\s*", "", reply, flags=re.I)
+    return reply.strip("\"„“”»«").strip()
+
+
+STOCK_WORDS = [
+    # Floskelwörter, die sich ohne Modell und ohne Sinnverlust tauschen lassen. Satzanfänge behalten die
+    # Verbzweitstellung, weil ein anderes Adverb an derselben Stelle steht.
+    (re.compile(r"\b(?:Des Weiteren|Darüber hinaus)\b"), "Außerdem"),
+    (re.compile(r"\b(?:des weiteren|darüber hinaus)\b"), "außerdem"),
+    (re.compile(r"\b(?:essenzielle|entscheidende|zentrale|wichtige)(n?) Rolle\b"), r"große\1 Rolle"),
+    (re.compile(r"\b([Ee])ssenziell"), lambda m: ("W" if m.group(1) == "E" else "w") + "ichtig"),
+    (re.compile(r"\b([Uu])nerlässlich"), lambda m: ("N" if m.group(1) == "U" else "n") + "otwendig"),
+    (re.compile(r"\b([Ll])etztendlich\b"), lambda m: m.group(1) + "etztlich"),
+    (re.compile(r"\bgewährleisten\b"), "sichern"),
+    (re.compile(r"\b(weitere[nrs]?) wichtige[nrs]? "), r"\1 "),
+]
+
+
+def strip_stock_words(source: str, sentence: str, qualifiers: list[str]) -> str:
+    """Tauscht einzelne Floskelwörter regelbasiert aus. Übernommen wird das nur, wenn der Satz dadurch weniger
+    Mängel hat und inhaltlich gleich bleibt."""
+    new = sentence
+    for pattern, replacement in STOCK_WORDS:
+        new = pattern.sub(replacement, new)
+    new = re.sub(r"\s{2,}", " ", new)
+    if new != sentence and keeps_content(source, sentence, new, qualifiers, loose=True) \
+            and issue_score(sentence_issues(source, new)) < issue_score(sentence_issues(source, sentence)):
+        return new
+    return sentence
+
+
+def repair_sentences(source: str, parts: list[str], model: str, url: str, qualifiers: list[str],
+                     tries: int = 2) -> tuple[list[str], int]:
+    """Repariert jeden fehlerhaften Satz einzeln. Eine Reparatur zählt nur, wenn sie den Satz messbar verbessert
+    und inhaltlich nichts verliert oder hinzufügt; sonst bleibt der alte Satz. Liefert Sätze und Zahl der Reparaturen.
+    Floskelwörter werden zuerst regelbasiert getauscht; Sätze mit Floskel bekommen einen zusätzlichen Versuch, bei
+    dem die Länge freier sein darf."""
+    done = 0
+    for i, sentence in enumerate(parts):
+        issues = sentence_issues(source, sentence)
+        if "floskel" in issues:
+            stripped = strip_stock_words(source, sentence, qualifiers)
+            if stripped != sentence:
+                parts[i], sentence, issues = stripped, stripped, sentence_issues(source, stripped)
+                done += 1
+        rounds = tries + (1 if "floskel" in issues else 0)
+        for attempt in range(rounds):
+            if not issues:
+                break
+            try:
+                candidate = clean_reply(_chat(model, url, [{"role": "system", "content": REPAIR_SYSTEM},
+                                                           {"role": "user", "content": repair_request(sentence, issues)}]))
+            except OllamaError:
+                break
+            new_issues = sentence_issues(source, candidate)
+            loose = attempt == rounds - 1 and rounds > tries
+            invents_link = len(new_issues.get("verknüpfung", [])) > len(issues.get("verknüpfung", []))
+            if (keeps_content(source, sentence, candidate, qualifiers, loose) and not invents_link
+                    and issue_score(new_issues) < issue_score(issues)):
+                parts[i], sentence, issues = candidate, candidate, new_issues
+                done += 1
+    return parts, done
+
+
+def drop_unfounded(source: str, parts: list[str], strict: bool) -> list[str]:
+    """Streicht ohne Modell, was nicht in den Absatz gehört: Sätze ohne Grundlage in der Vorlage, die keine Angabe
+    tragen, und im akademischen Stil Fragmente wie "38 %.", deren Angabe schon in einem anderen Satz steht."""
+    kept = []
+    for i, sentence in enumerate(parts):
+        rest = " ".join(parts[:i] + parts[i + 1:])
+        carries = CITATION.search(sentence) or missing_facts(sentence, rest)
+        if unsupported_sentences(source, sentence) and not carries:
+            continue
+        if strict and fragments(sentence) and not carries:
+            continue
+        kept.append(sentence)
+    return kept or parts[:1]
+
+
+def overlap(a: str, b: str) -> float:
+    stems = core_stems(a)
+    return len(stems & core_stems(b)) / len(stems) if stems else 0.0
+
+
+def restore_facts(source: str, parts: list[str], complete: bool = False) -> tuple[list[str], int]:
+    """Stellt sicher, dass keine Zahl, kein Datum und keine Quelle fehlt, erfunden ist oder falsch steht.
+
+    Wo die Ausgabe das nicht hält, tritt der Originalsatz an die Stelle des betroffenen Satzes. Im schlimmsten Fall
+    bleibt damit ein Satz unverändert; verloren oder verfälscht ist dann nichts. Mit complete gilt dasselbe für
+    Sätze mit einem neu behaupteten Gegensatz oder einer neuen Folge und für Aussagen der Vorlage, die ganz fehlen.
+    Liefert Sätze und Zahl der Eingriffe.
+    """
+    originals = raw_sentences(source)
+    parts, changes = list(parts), 0
+
+    def put(original: str, at: int | None) -> None:
+        """Setzt den Originalsatz an Stelle at oder dorthin, wo der ähnlichste Satz der Ausgabe steht."""
+        nonlocal changes
+        changes += 1
+        if original in parts:
+            return
+        if at is None:
+            scores = [overlap(original, p) for p in parts]
+            if scores and max(scores) >= 0.5:
+                at = scores.index(max(scores))
+        if at is not None:
+            parts[at] = original
+        else:
+            position = round(originals.index(original) * len(parts) / max(len(originals), 1))
+            parts.insert(min(position, len(parts)), original)
+
+    for _ in range(3 * len(originals) + 3):
+        text = " ".join(parts)
+        invented = next((i for i, p in enumerate(parts) if added_facts(source, p)), None)
+        if invented is not None:
+            best = max(originals, key=lambda o: overlap(o, parts[invented]))
+            if overlap(best, parts[invented]) >= 0.3:
+                put(best, invented)
+            else:
+                del parts[invented]
+                changes += 1
+            continue
+        moved = misplaced_citations(source, text)
+        if moved:
+            citation = moved[0][0]
+            at = next((i for i, p in enumerate(parts) if citation in p), None)
+            put(next(o for o in originals if citation in o), at)
+            continue
+        missing = missing_citations(source, text) + missing_facts(source, text)
+        if missing:
+            original = next((o for o in originals if missing[0] in o), None)
+            if original is None or original in parts:
+                break
+            put(original, None)
+            continue
+        if not complete:
+            break
+        # Ein Satz, der mit "obwohl" oder "sodass" einen Zusammenhang behauptet, den die Vorlage nicht kennt.
+        linked = next((i for i, p in enumerate(parts) if p not in originals and sentence_issues(source, p).get("verknüpfung")), None)
+        if linked is not None:
+            put(max(originals, key=lambda o: overlap(o, parts[linked])), linked)
+            continue
+        # Eine Aussage der Vorlage, von der in der Ausgabe so gut wie nichts mehr steht.
+        dropped = next((o for o in originals if len(core_stems(o)) >= 3 and overlap(o, text) < 0.25), None)
+        if dropped is None:
+            break
+        put(dropped, None)
+    return parts, changes
+
+
+def split_longest(source: str, parts: list[str], model: str, url: str, qualifiers: list[str], spread) -> tuple[list[str], int]:
+    """Teilt den längsten Satz in einen kurzen und einen längeren."""
+    lengths = [len(p.split()) for p in parts]
+    i = lengths.index(max(lengths))
+    if lengths[i] < 16:
+        return parts, 0
+    request = ("Teile diesen Satz in genau zwei Sätze: einen kurzen mit höchstens 8 Wörtern und einen längeren. "
+               "Beide sind vollständige Sätze. Kein \"obwohl\", \"sodass\", \"daher\", \"weil\", \"da\". Alle Zahlen und "
+               "Quellenangaben bleiben wörtlich.\n\nSatz: " + parts[i])
+    try:
+        reply = clean_reply(_chat(model, url, [{"role": "system", "content": REPAIR_SYSTEM},
+                                               {"role": "user", "content": request}]))
+    except OllamaError:
+        return parts, 0
+    pieces = raw_sentences(reply)
+    new_lengths = lengths[:i] + [len(p.split()) for p in pieces] + lengths[i + 1:]
+    fine = (len(pieces) == 2 and not fragments(reply) and keeps_content(source, parts[i], reply, qualifiers)
+            and spread(new_lengths) > spread(lengths)
+            and issue_score(sentence_issues(source, reply)) <= issue_score(sentence_issues(source, parts[i])))
+    return (parts[:i] + pieces + parts[i + 1:], 1) if fine else (parts, 0)
+
+
+def merge_pair(source: str, parts: list[str], i: int, model: str, url: str, qualifiers: list[str]) -> tuple[list[str], int]:
+    """Legt Satz i und i+1 zusammen, wenn dabei nichts verloren geht und kein neuer Zusammenhang entsteht."""
+    pair = parts[i] + " " + parts[i + 1]
+    request = ("Verbinde diese zwei Sätze zu einem einzigen Satz. Verbinde neutral: mit \"und\", einem Relativsatz, "
+               "einem Doppelpunkt oder einem Semikolon. Kein \"obwohl\", \"sodass\", \"daher\", \"weil\", \"da\". Alle Zahlen und "
+               "Quellenangaben bleiben wörtlich.\n\nSätze: " + pair)
+    try:
+        merged = clean_reply(_chat(model, url, [{"role": "system", "content": REPAIR_SYSTEM},
+                                                {"role": "user", "content": request}]))
+    except OllamaError:
+        return parts, 0
+    fine = (len(raw_sentences(merged)) == 1 and keeps_content(source, pair, merged, qualifiers)
+            and issue_score(sentence_issues(source, merged)) <= issue_score(sentence_issues(source, parts[i]))
+            + issue_score(sentence_issues(source, parts[i + 1])))
+    return (parts[:i] + [merged] + parts[i + 2:], 1) if fine else (parts, 0)
+
+
+def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers: list[str],
+                attempts: int = 3) -> tuple[list[str], int]:
+    """Sind die Sätze eines Absatzes zu gleich lang, probiert die App der Reihe nach, was am meisten bringt: zwei
+    Nachbarn zusammenlegen oder den längsten Satz teilen. Der erste Eingriff, bei dem nichts verloren geht und kein
+    neuer Zusammenhang behauptet wird, gilt. Höchstens attempts Anfragen an das Modell."""
+    def spread(lengths: list[int]) -> float:
+        return burstiness(" ".join("x " * (n - 1) + "x." for n in lengths))
+
+    lengths = [len(p.split()) for p in parts]
+    if len(parts) < 2 or spread(lengths) >= 0.50:  # Abstand zur Prüfschwelle 0,45
+        return parts, 0
+    options = sorted(((spread(lengths[:i] + [lengths[i] + lengths[i + 1]] + lengths[i + 2:]), i)
+                      for i in range(len(parts) - 1) if lengths[i] + lengths[i + 1] <= 45), reverse=True) \
+        if len(parts) >= 3 else []
+    steps = [lambda i=i: merge_pair(source, parts, i, model, url, qualifiers)
+             for gain, i in options if gain > spread(lengths)]
+    # Teilen kommt nach dem besten Zusammenlegen, vor den schwächeren Varianten.
+    steps.insert(1 if steps else 0, lambda: split_longest(source, parts, model, url, qualifiers, spread))
+    for step in steps[:attempts]:
+        new, done = step()
+        if done:
+            return new, done
+    return parts, 0
+
+
+def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,
+                      rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
+    """Schreibt einen Absatz nach Bauplan um und repariert ihn danach Satz für Satz.
+
+    1. Entwurf nach Bauplan; ist er grob daneben, höchstens retries neue Entwürfe mit Rückmeldung.
+    2. Sätze ohne Grundlage und Fragmente streichen.
+    3. Jeden Satz mit Floskel, wörtlicher Übernahme oder neuer Verknüpfung einzeln reparieren.
+    4. Fehlende, erfundene oder verrutschte Zahlen und Quellen, neu behauptete Zusammenhänge und ganz fehlende
+       Aussagen durch den Originalsatz ersetzen, und diese Sätze noch einmal einzeln reparieren.
+    5. Zu gleichförmige Satzlängen durch Zusammenlegen zweier Sätze auflockern.
+    Jeder Schritt wird nur übernommen, wenn er nichts verschlechtert. Zurück kommen der Absatz, die Zahl der
+    Eingriffe und die Einschränkungen (Orte, Zeiträume, Gruppen), die erhalten bleiben sollten.
     """
     qualifiers = extract_qualifiers(paragraph)
-    plan, example = sentence_plan(paragraph, pool, rng)
+    strict = style == "Akademisch"
+    plan, example = sentence_plan(paragraph, pool, rng, strict)
     messages = [{"role": "system", "content": system_prompt(style, [example] if example else [])},
                 {"role": "user", "content": paragraph_request(paragraph, plan, avoid, qualifiers)}]
-    current = flatten(_chat(model, url, messages))
-    best, best_score, extra = current, paragraph_badness(paragraph, current, plan, avoid, qualifiers), 0
+    draft = flatten(_chat(model, url, messages))
+    score, extra = paragraph_badness(paragraph, draft, plan, avoid, qualifiers, strict), 0
     for _ in range(retries):
-        issues = paragraph_problems(paragraph, current, plan, avoid, qualifiers)
-        if not issues:
+        if score < 60:  # nur bei groben Mängeln neu ansetzen, alles andere reparieren die Schritte unten gezielter
             break
-        current = flatten(_chat(model, url, messages + [
-            {"role": "assistant", "content": current},
+        issues = paragraph_problems(paragraph, draft, plan, avoid, qualifiers, strict)
+        again = flatten(_chat(model, url, messages + [
+            {"role": "assistant", "content": draft},
             {"role": "user", "content": "Das passt noch nicht:\n- " + "\n- ".join(issues) +
              "\n\nGib nur den verbesserten Absatz aus."}]))
         extra += 1
-        score = paragraph_badness(paragraph, current, plan, avoid, qualifiers)
-        if score <= best_score:
-            best, best_score = current, score
-    return best, extra, qualifiers
+        if paragraph_badness(paragraph, again, plan, avoid, qualifiers, strict) < score:
+            draft, score = again, paragraph_badness(paragraph, again, plan, avoid, qualifiers, strict)
+
+    parts = drop_unfounded(paragraph, raw_sentences(draft), strict)
+    parts, repaired = repair_sentences(paragraph, parts, model, url, qualifiers)
+    parts, restored = restore_facts(paragraph, parts, complete=True)
+    if restored:  # zurückgesetzte Originalsätze bekommen ihre eigene Chance, umformuliert zu werden
+        parts, more = repair_sentences(paragraph, parts, model, url, qualifiers)
+        repaired += more
+    parts, merged = vary_rhythm(paragraph, parts, model, url, qualifiers)
+    parts, again = restore_facts(paragraph, parts)
+    stripped = [strip_stock_words(paragraph, p, qualifiers) for p in parts]
+    again += sum(a != b for a, b in zip(stripped, parts))
+    return " ".join(stripped), extra + repaired + restored + merged + again, qualifiers
 
 
 def needs_rewrite(paragraph: str) -> bool:
@@ -720,7 +1032,7 @@ def needs_rewrite(paragraph: str) -> bool:
 
 
 def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, pool: list | None = None,
-                     retries: int = 2, progress=lambda done, total: None,
+                     retries: int = 1, progress=lambda done, total: None,
                      rng: random.Random | None = None) -> tuple[str, int, list[str]]:
     """Schreibt den Text Absatz für Absatz um.
 
@@ -728,7 +1040,8 @@ def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, p
     """
     paras = paragraphs(text)
     todo = [i for i, p in enumerate(paras) if needs_rewrite(p)]
-    out, extra, used, qualifiers = list(paras), 0, [], []
+    # Die Wendungen sind von Anfang an verboten, nicht erst nach ihrem ersten Auftreten.
+    out, extra, used, qualifiers = list(paras), 0, [name for _, name in HABITS], []
     for step, i in enumerate(todo, start=1):
         progress(step, len(todo))
         out[i], more, found = rewrite_paragraph(paras[i], style, model, url, pool or [], retries, rng, used)
@@ -745,7 +1058,8 @@ NUMBER_WORDS = dict(zip(map(str, range(2, 13)), "zwei drei vier fünf sechs sieb
 
 
 UNITS = (r"%|Prozent|‰|Promille|€|Euro|dB\(A\)|km|kWh|MWh|GWh|Gigawattstunden|Megawattstunden|Kilowattstunden|"
-         r"Minuten|Stunden|Tagen|Tage|Wochen|Monaten|Monate|Jahren|Jahre|Personen|Prozentpunkte")
+         r"km/h|Minuten|Minute|Stunden|Stunde|Tagen|Tage|Tag|Wochen|Woche|Monaten|Monate|Monat|Jahren|Jahre|Jahr|"
+         r"Personen|Person|Prozentpunkte|Metern|Meter|Watt")
 FACT_WITH_UNIT = re.compile(r"(\d+(?:[.,:/-]\d+)*)(?:\s?(%s))?(?![\w(])" % UNITS)
 SAME_UNIT = {"Prozent": "%", "Promille": "‰", "Euro": "€", "GWh": "giga", "MWh": "mega", "kWh": "kilo"}
 
@@ -753,13 +1067,13 @@ SAME_UNIT = {"Prozent": "%", "Promille": "‰", "Euro": "€", "GWh": "giga", "M
 def facts(text: str) -> list[tuple[str, str, str]]:
     """Zahlen mit ihrer Einheit als (Zahl, vereinheitlichte Einheit, wie es dasteht).
 
-    "60 %" und "60 Prozent" bekommen dieselbe Einheit, Wort-Einheiten werden über ihre ersten vier Buchstaben
-    verglichen, damit "Personen" und "Personen," oder "Tage" und "Tagen" gleich zählen.
+    "60 %" und "60 Prozent" bekommen dieselbe Einheit, Wort-Einheiten werden über ihre ersten drei Buchstaben
+    verglichen, damit "Tag", "Tage" und "Tagen" gleich zählen.
     """
     found = []
     for m in FACT_WITH_UNIT.finditer(text):
         unit = m.group(2) or ""
-        unit = SAME_UNIT.get(unit, unit if not unit[:1].isalpha() or unit == "dB(A)" else unit.lower()[:4])
+        unit = SAME_UNIT.get(unit, unit if not unit[:1].isalpha() or unit in ("dB(A)", "km/h") else unit.lower()[:3])
         found.append((m.group(1), unit, m.group(0)))
     return found
 
@@ -774,8 +1088,12 @@ def missing_facts(source: str, result: str) -> list[str]:
     have = {(n, u) for n, u, _ in facts(result)}
     numbers = {n for n, _ in have}
     missing = []
-    for number, unit, surface in facts(source):
+    # Zahlen in Quellenangaben prüft missing_citations(), sonst zählt eine fehlende Quelle doppelt.
+    for number, unit, surface in facts(CITATION.sub(" ", source)):
         spelled = number in NUMBER_WORDS and re.search(r"\b%s\b" % NUMBER_WORDS[number], result, re.I)
+        if number == "1":  # "1 Tag" -> "einen Tag"; "ein" allein steht überall, deshalb nur mit dem Wort danach
+            after = re.escape(surface.split(None, 1)[1][:4]) if " " in surface else ""
+            spelled = bool(after) and re.search(r"\bein(?:e[nmrs]?)?\s+%s" % after, result, re.I)
         present = (number, unit) in have if unit else number in numbers
         if not present and not spelled and surface not in missing:
             missing.append(surface)
@@ -815,7 +1133,13 @@ def core_stems(text: str) -> set[str]:
 CONNECTORS = {
     "Gegensatz": ["obwohl", "obgleich", "obschon", "trotzdem", "dennoch", "jedoch", "allerdings", "wenngleich"],
     "Folge": ["sodass", "wodurch", "daher", "deshalb", "deswegen", "folglich", "somit", "weshalb", "infolgedessen"],
+    # "da" nur als Bindewort nach Komma, sonst träfe es jedes "da ist"
+    "Grund": ["weil", "denn", "(?<=, )da"],
 }
+
+
+def connector_name(pattern: str) -> str:
+    return re.sub(r"\(.*?\)", "", pattern)
 
 
 def new_connectors(source: str, result: str) -> list[tuple[str, int, list[str]]]:
@@ -829,7 +1153,7 @@ def new_connectors(source: str, result: str) -> list[tuple[str, int, list[str]]]
             pattern = re.compile(r"\b%s\b" % word, re.I)
             extra = len(pattern.findall(result)) - len(pattern.findall(source))
             if extra > 0:
-                found.append((word, extra, [s for s in sentences(result) if pattern.search(s)]))
+                found.append((connector_name(word), extra, [s for s in sentences(result) if pattern.search(s)]))
     return found
 
 
@@ -884,7 +1208,7 @@ def repeated_sentences(result: str) -> list[str]:
 # Wendungen, die eine Aussage genau machen oder einschränken: wo, bei wem, wofür, seit wann.
 QUALIFIER_PP = re.compile(
     r"\b(?:[Ii]n|[Ii]m|[Aa]m|[Bb]ei|[Bb]eim|[Pp]ro|[Jj]e|[Ss]eit|[Aa]us|[Ii]nnerhalb|[Aa]ußerhalb|[Ff]ür)\s+"
-    r"(?:(?:der|dem|den|des|die|das|einem|einer|eines)\s+)?(?:[a-zäöüß]+(?:en|em|er|es|e)\s+)?[A-ZÄÖÜ][\wäöüß-]+")
+    r"(?:(?:der|dem|den|des|die|das|einem|einer|eines)\s+)?(?:(?!denen|deren|dessen|welche)[a-zäöüß]+(?:en|em|er|es|e)\s+)?[A-ZÄÖÜ][\wäöüß-]*[\wäöüß]\b(?!-)")
 QUALIFIER_ADJ = re.compile(
     r"\b(?:europä|österreich|deutsch|schweizer|amerikan|asiat|afrikan|internation|national|region|kommunal|städt|"
     r"ländl|bundes|landes|öffentl|privat|gesetzl|behördl|mehrtäg|eintäg|jährl|monatl|wöchentl|tägl)[a-zäöüß]*"
@@ -929,8 +1253,13 @@ def shrinkage(source: str, result: str) -> int:
     return round(100 * (before - len(result.split())) / before) if before else 0
 
 
-def warnings(source: str, result: str, qualifiers: list[str] | None = None) -> str:
+def warnings(source: str, result: str, qualifiers: list[str] | None = None, strict: bool = False) -> str:
     parts = []
+    if strict and fragments(result):
+        parts.append("Satzfragment: " + " / ".join(f'"{f}"' for f in fragments(result)))
+    left = habits(result)
+    if left:
+        parts.append("Floskel: " + ", ".join(left))
     lost = missing_qualifiers(qualifiers or [], result)
     if lost:
         parts.append("Einschränkung fehlt: " + "; ".join(lost))
@@ -976,6 +1305,7 @@ class App:
         self.installed: list[str] = []
         self.memory: tuple[float | None, float | None] = (None, None)
         self.busy = False
+        self.last_style = ""
         self.pulling: str | None = None
         self.cancel_pull = threading.Event()
         self.updating = False
@@ -1409,7 +1739,8 @@ class App:
             f"{changed_share(result, added)} % neu formuliert  ·  "
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
             f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))
-        self.warning.config(text="  ".join(filter(None, [warnings(source, result, qualifiers), note])))
+        strict = self.last_style == "Akademisch"
+        self.warning.config(text="  ".join(filter(None, [warnings(source, result, qualifiers, strict), note])))
 
     def _on_cleared(self, count: int) -> None:
         self.clear.config(state="normal")
@@ -1443,6 +1774,7 @@ class App:
         self.warning.config(text="")
         self.status.config(text="Schreibe um … das kann bei langen Texten ein, zwei Minuten dauern.", fg=MUTED)
         model, style, source = self.model.get(), self.style.get(), self.source.get()
+        self.last_style = style
 
         def work() -> None:
             start = time.time()

@@ -63,7 +63,15 @@ Danach prüft sie jeden Absatz:
 - sind Sätze fast wörtlich aus dem Original übernommen?
 - stehen noch KI-Floskeln drin, hängt er ständig ", weil …" an?
 
-Findet sie etwas, schickt sie dem Modell eine konkrete Rückmeldung, höchstens zweimal pro Absatz, und behält die beste Fassung. Die Statuszeile zeigt den Fortschritt ("Absatz 3 von 6") und am Ende, wie oft nachgebessert wurde. Was danach noch fehlt, erfunden oder kaum verändert ist, steht rot unter den Textfeldern.
+Was sie findet, repariert sie gezielt, Schritt für Schritt:
+
+1. Ist der Entwurf grob daneben, schreibt das Modell den Absatz einmal neu, mit konkreter Rückmeldung.
+2. Sätze ohne Grundlage und Satzfragmente fliegen raus.
+3. Jeder Satz mit Floskel, wörtlicher Übernahme oder neuer Verknüpfung wird einzeln repariert. Einfache Floskelwörter tauscht die App ohne Modell aus ("Des Weiteren" → "Außerdem", "essenzielle Rolle" → "große Rolle"). Eine Reparatur zählt nur, wenn der Satz danach besser ist, nichts verliert und keinen neuen Zusammenhang behauptet.
+4. Fehlt eine Zahl, Quelle oder ganze Aussage, oder ist etwas erfunden oder verrutscht, kommt der Originalsatz zurück und wird noch einmal einzeln umformuliert.
+5. Sind die Sätze zu gleich lang, legt die App zwei Nachbarn zusammen oder teilt den längsten.
+
+Die Statuszeile zeigt den Fortschritt ("Absatz 3 von 6") und am Ende, wie oft eingegriffen wurde. Was danach noch fehlt, erfunden oder kaum verändert ist, steht rot unter den Textfeldern.
 
 Nicht erkannt werden verdrehte Zusammenhänge ohne Signalwort ("das Konzept begrenzt die Dichte" statt "die Verordnung schreibt sie vor"), erfundene Teilsätze in sonst passenden Sätzen und Wiederholungen mit ganz anderen Worten. Ein Satz, der fast nur aus Synonymen besteht, kann umgekehrt fälschlich als "ohne Grundlage" gemeldet werden. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
 
@@ -97,6 +105,33 @@ python humanizer.py
 ```
 
 Läuft Ollama auf einem anderen Rechner oder Port, die Adresse über die Umgebungsvariable `OLLAMA_URL` setzen (Standard: `http://localhost:11434`).
+
+## Testreihe: so gut ist der Stand gemessen
+
+In `werkzeuge/testtexte/` liegen fünf KI-typische Texte zu Event-Engineering-Themen (Nachhaltigkeit, Technikgeschichte, Sponsoring, Zeitplanung, Kaffeekultur), vier akademisch, einer locker. Die Quellenangaben darin sind erfunden. `werkzeuge/testreihe.py` schreibt jeden Text um und prüft das Ergebnis gegen feste Kriterien:
+
+| Kriterium | Grenze |
+|---|---|
+| Zahlen und Daten fehlen oder erfunden | keine |
+| Quellenangaben fehlen oder verrutscht | keine |
+| Einschränkungen (Orte, Zeiträume, Gruppen) fehlen | höchstens 1 |
+| neu behauptete Zusammenhänge ("obwohl", "sodass", "weil" …) | höchstens 1 |
+| Sätze ohne Grundlage im Original | höchstens 1 |
+| Satzfragmente (akademisch) | keine |
+| Floskeln | höchstens 2, wie bei echten Menschentexten |
+| Streuung der Satzlängen | ab 0,45 |
+| fast wörtlich übernommene Sätze | höchstens 20 % |
+| Länge im Vergleich zum Original | 80 bis 120 % |
+
+**Gemessen mit `gemma3:12b`: 8 von 10 Läufen bestanden** (fünf Texte, je zwei Läufe). Kein Lauf hat eine Zahl, Quelle oder Einschränkung verloren oder etwas erfunden. Beide Fehlschläge betreffen den Sponsoring-Text: Er wurde auf 72 bzw. 78 % gekürzt, weil der Testtext voller Floskeln steckt ("In der heutigen Zeit", "Abschließend lässt sich sagen"), die beim Umschreiben wegfallen.
+
+Selbst laufen lassen, zum Beispiel mit dem 24b-Modell (dauert je nach Rechner eine bis mehrere Stunden):
+
+```
+python werkzeuge/testreihe.py --model mistral-small3.2:24b
+```
+
+Was die Testreihe nicht sieht: abgeschwächte Aussagen ("muss" wird zu "sollte"), weggelassene Halbsätze ohne Zahl und verdrehte Zusammenhänge ohne Signalwort. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
 
 ## Tests
 

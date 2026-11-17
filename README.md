@@ -63,7 +63,15 @@ Danach prüft sie jeden Absatz:
 - sind Sätze fast wörtlich aus dem Original übernommen?
 - stehen noch KI-Floskeln drin, hängt er ständig ", weil …" an?
 
-Findet sie etwas, schickt sie dem Modell eine konkrete Rückmeldung, höchstens zweimal pro Absatz, und behält die beste Fassung. Die Statuszeile zeigt den Fortschritt ("Absatz 3 von 6") und am Ende, wie oft nachgebessert wurde. Was danach noch fehlt, erfunden oder kaum verändert ist, steht rot unter den Textfeldern.
+Was sie findet, repariert sie gezielt, Schritt für Schritt:
+
+1. Ist der Entwurf grob daneben, schreibt das Modell den Absatz einmal neu, mit konkreter Rückmeldung.
+2. Sätze ohne Grundlage und Satzfragmente fliegen raus.
+3. Jeder Satz mit Floskel, wörtlicher Übernahme oder neuer Verknüpfung wird einzeln repariert. Einfache Floskelwörter tauscht die App ohne Modell aus ("Des Weiteren" → "Außerdem", "essenzielle Rolle" → "große Rolle"). Eine Reparatur zählt nur, wenn der Satz danach besser ist, nichts verliert und keinen neuen Zusammenhang behauptet.
+4. Fehlt eine Zahl, Quelle oder ganze Aussage, oder ist etwas erfunden oder verrutscht, kommt der Originalsatz zurück und wird noch einmal einzeln umformuliert.
+5. Sind die Sätze zu gleich lang, legt die App zwei Nachbarn zusammen oder teilt den längsten.
+
+Die Statuszeile zeigt den Fortschritt ("Absatz 3 von 6") und am Ende, wie oft eingegriffen wurde. Was danach noch fehlt, erfunden oder kaum verändert ist, steht rot unter den Textfeldern.
 
 Nicht erkannt werden verdrehte Zusammenhänge ohne Signalwort ("das Konzept begrenzt die Dichte" statt "die Verordnung schreibt sie vor"), erfundene Teilsätze in sonst passenden Sätzen und Wiederholungen mit ganz anderen Worten. Ein Satz, der fast nur aus Synonymen besteht, kann umgekehrt fälschlich als "ohne Grundlage" gemeldet werden. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
 

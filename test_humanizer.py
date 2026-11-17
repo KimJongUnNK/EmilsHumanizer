@@ -1085,3 +1085,42 @@ def test_grund_verknuepfungen_und_teilen(monkeypatch):
     assert n == 1 and len(out) == 3
     stub_chat(monkeypatch, {}, repair=lambda s: "1888. Das Savoy Theatre führte 1881 Licht ein und das Burgtheater in Wien folgte.")
     assert h.vary_rhythm(src, list(parts), "m", "u", []) == (parts, 0)
+
+
+def test_floskelwoerter_regelbasiert():
+    src = "Des Weiteren spielen Gemeinschaften eine essenzielle Rolle beim Kaffee in Wien."
+    fixed = h.strip_stock_words(src, src, [])
+    assert fixed == "Außerdem spielen Gemeinschaften eine große Rolle beim Kaffee in Wien."
+    assert h.issue_score(h.sentence_issues(src, fixed)) < h.issue_score(h.sentence_issues(src, src))
+    # Zahlen und Quellen bleiben unberührt, ein Satz ohne Floskel bleibt gleich.
+    plain = "Der Umsatz stieg 2023 um 12 % (vgl. Berger 2021, S. 45)."
+    assert h.strip_stock_words(plain, plain, []) == plain
+
+
+def test_floskelsatz_bekommt_zusaetzlichen_lockeren_versuch(monkeypatch):
+    src = "Gemeinschaften stellen einen Faktor dar. Kaffee verbindet Menschen in vielen Städten."
+    sentence = "Gemeinschaften stellen einen Faktor dar."
+    long_answer = "In vielen Städten sind Gemeinschaften ein Faktor, den Kaffee mit Menschen verbindet."
+
+    def run(third):
+        replies, calls = iter(["Nein.", "Nein.", third]), []
+        monkeypatch.setattr(h, "_chat", lambda model, url, messages: calls.append(messages) or next(replies))
+        return h.repair_sentences(src, [sentence], "m", "u", []), calls
+
+    (parts, done), calls = run(long_answer)
+    assert len(calls) == 3  # zwei normale Versuche plus ein lockerer für die Floskel
+    assert not h.keeps_content(src, sentence, long_answer, [])  # normal zu lang ...
+    assert parts == [long_answer] and done == 1  # ... im lockeren Versuch erlaubt
+    # Eine neue Verknüpfung ("weil") wird nie gegen eine andere Schwäche eingetauscht.
+    (parts, done), _ = run("Gemeinschaften sind ein Faktor, weil Kaffee Menschen in vielen Städten verbindet.")
+    assert parts == [sentence] and done == 0
+
+
+def test_rhythmus_greift_mit_abstand_zur_schwelle(monkeypatch):
+    calls = []
+    monkeypatch.setattr(h, "_chat", lambda *a: calls.append(a) or "Nein.")
+    parts = ["Eins zwei drei vier fünf sechs sieben acht neun zehn.",
+             "Eins zwei drei vier fünf sechs sieben acht neun zehn elf.",
+             "Eins zwei drei vier fünf sechs sieben acht neun zehn elf zwölf."]
+    h.vary_rhythm(" ".join(parts), list(parts), "m", "u", [])
+    assert calls  # Streuung weit unter 0,50: das Modell wird gefragt

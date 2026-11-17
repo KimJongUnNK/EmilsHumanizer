@@ -753,11 +753,13 @@ def repair_request(sentence: str, issues: dict[str, list[str]]) -> str:
     return "Formuliere diesen Satz neu.\n" + "\n".join(lines) + "\n\nSatz: " + sentence
 
 
-def keeps_content(source: str, old: str, new: str, qualifiers: list[str]) -> bool:
-    """Trägt die neue Fassung alles, was die alte trug, und nichts, was die Vorlage nicht hat?"""
+def keeps_content(source: str, old: str, new: str, qualifiers: list[str], loose: bool = False) -> bool:
+    """Trägt die neue Fassung alles, was die alte trug, und nichts, was die Vorlage nicht hat?
+    loose erlaubt mehr Spielraum bei der Länge, an Zahlen, Quellen und Einschränkungen ändert es nichts."""
     carried = [q for q in qualifiers if core_stems(q) <= core_stems(old)]
+    low, high = (0.5, 2.0 * len(old.split()) + 4) if loose else (0.6, 1.6 * len(old.split()) + 3)
     return (bool(new.strip())
-            and 0.6 * len(old.split()) <= len(new.split()) <= 1.6 * len(old.split()) + 3
+            and low * len(old.split()) <= len(new.split()) <= high
             and not missing_facts(old, new) and all(c in new for c in CITATION.findall(old))
             and not added_facts(source, new) and not unsupported_sentences(source, new)
             and not missing_qualifiers(carried, new))
@@ -769,14 +771,49 @@ def clean_reply(reply: str) -> str:
     return reply.strip("\"„“”»«").strip()
 
 
+STOCK_WORDS = [
+    # Floskelwörter, die sich ohne Modell und ohne Sinnverlust tauschen lassen. Satzanfänge behalten die
+    # Verbzweitstellung, weil ein anderes Adverb an derselben Stelle steht.
+    (re.compile(r"\b(?:Des Weiteren|Darüber hinaus)\b"), "Außerdem"),
+    (re.compile(r"\b(?:des weiteren|darüber hinaus)\b"), "außerdem"),
+    (re.compile(r"\b(?:essenzielle|entscheidende|zentrale|wichtige)(n?) Rolle\b"), r"große\1 Rolle"),
+    (re.compile(r"\b([Ee])ssenziell"), lambda m: ("W" if m.group(1) == "E" else "w") + "ichtig"),
+    (re.compile(r"\b([Uu])nerlässlich"), lambda m: ("N" if m.group(1) == "U" else "n") + "otwendig"),
+    (re.compile(r"\b([Ll])etztendlich\b"), lambda m: m.group(1) + "etztlich"),
+    (re.compile(r"\bgewährleisten\b"), "sichern"),
+    (re.compile(r"\b(weitere[nrs]?) wichtige[nrs]? "), r"\1 "),
+]
+
+
+def strip_stock_words(source: str, sentence: str, qualifiers: list[str]) -> str:
+    """Tauscht einzelne Floskelwörter regelbasiert aus. Übernommen wird das nur, wenn der Satz dadurch weniger
+    Mängel hat und inhaltlich gleich bleibt."""
+    new = sentence
+    for pattern, replacement in STOCK_WORDS:
+        new = pattern.sub(replacement, new)
+    new = re.sub(r"\s{2,}", " ", new)
+    if new != sentence and keeps_content(source, sentence, new, qualifiers, loose=True) \
+            and issue_score(sentence_issues(source, new)) < issue_score(sentence_issues(source, sentence)):
+        return new
+    return sentence
+
+
 def repair_sentences(source: str, parts: list[str], model: str, url: str, qualifiers: list[str],
                      tries: int = 2) -> tuple[list[str], int]:
     """Repariert jeden fehlerhaften Satz einzeln. Eine Reparatur zählt nur, wenn sie den Satz messbar verbessert
-    und inhaltlich nichts verliert oder hinzufügt; sonst bleibt der alte Satz. Liefert Sätze und Zahl der Reparaturen."""
+    und inhaltlich nichts verliert oder hinzufügt; sonst bleibt der alte Satz. Liefert Sätze und Zahl der Reparaturen.
+    Floskelwörter werden zuerst regelbasiert getauscht; Sätze mit Floskel bekommen einen zusätzlichen Versuch, bei
+    dem die Länge freier sein darf."""
     done = 0
     for i, sentence in enumerate(parts):
         issues = sentence_issues(source, sentence)
-        for _ in range(tries):
+        if "floskel" in issues:
+            stripped = strip_stock_words(source, sentence, qualifiers)
+            if stripped != sentence:
+                parts[i], sentence, issues = stripped, stripped, sentence_issues(source, stripped)
+                done += 1
+        rounds = tries + (1 if "floskel" in issues else 0)
+        for attempt in range(rounds):
             if not issues:
                 break
             try:
@@ -785,7 +822,10 @@ def repair_sentences(source: str, parts: list[str], model: str, url: str, qualif
             except OllamaError:
                 break
             new_issues = sentence_issues(source, candidate)
-            if keeps_content(source, sentence, candidate, qualifiers) and issue_score(new_issues) < issue_score(issues):
+            loose = attempt == rounds - 1 and rounds > tries
+            invents_link = len(new_issues.get("verknüpfung", [])) > len(issues.get("verknüpfung", []))
+            if (keeps_content(source, sentence, candidate, qualifiers, loose) and not invents_link
+                    and issue_score(new_issues) < issue_score(issues)):
                 parts[i], sentence, issues = candidate, candidate, new_issues
                 done += 1
     return parts, done
@@ -906,7 +946,7 @@ def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers:
         return burstiness(" ".join("x " * (n - 1) + "x." for n in lengths))
 
     lengths = [len(p.split()) for p in parts]
-    if len(parts) < 2 or spread(lengths) >= 0.45:
+    if len(parts) < 2 or spread(lengths) >= 0.50:  # Abstand zur Prüfschwelle 0,45
         return parts, 0
     options = [(spread(lengths[:i] + [lengths[i] + lengths[i + 1]] + lengths[i + 2:]), i)
                for i in range(len(parts) - 1) if lengths[i] + lengths[i + 1] <= 45] if len(parts) >= 3 else []
@@ -968,7 +1008,9 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
         repaired += more
     parts, merged = vary_rhythm(paragraph, parts, model, url, qualifiers)
     parts, again = restore_facts(paragraph, parts)
-    return " ".join(parts), extra + repaired + restored + merged + again, qualifiers
+    stripped = [strip_stock_words(paragraph, p, qualifiers) for p in parts]
+    again += sum(a != b for a, b in zip(stripped, parts))
+    return " ".join(stripped), extra + repaired + restored + merged + again, qualifiers
 
 
 def needs_rewrite(paragraph: str) -> bool:

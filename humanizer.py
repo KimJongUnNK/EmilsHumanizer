@@ -918,10 +918,10 @@ def restore_facts(source: str, parts: list[str], complete: bool = False) -> tupl
 
 
 def split_longest(source: str, parts: list[str], model: str, url: str, qualifiers: list[str], spread) -> tuple[list[str], int]:
-    """Teilt den längsten Satz in einen kurzen und einen längeren, wenn Zusammenlegen nicht hilft."""
+    """Teilt den längsten Satz in einen kurzen und einen längeren."""
     lengths = [len(p.split()) for p in parts]
     i = lengths.index(max(lengths))
-    if lengths[i] < 22:
+    if lengths[i] < 16:
         return parts, 0
     request = ("Teile diesen Satz in genau zwei Sätze: einen kurzen mit höchstens 8 Wörtern und einen längeren. "
                "Beide sind vollständige Sätze. Kein \"obwohl\", \"sodass\", \"daher\", \"weil\", \"da\". Alle Zahlen und "
@@ -939,20 +939,8 @@ def split_longest(source: str, parts: list[str], model: str, url: str, qualifier
     return (parts[:i] + pieces + parts[i + 1:], 1) if fine else (parts, 0)
 
 
-def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers: list[str]) -> tuple[list[str], int]:
-    """Sind die Sätze eines Absatzes zu gleich lang, werden die zwei Nachbarn zusammengelegt, bei denen das am
-    meisten bringt. Angenommen wird das nur, wenn nichts verloren geht und kein neuer Zusammenhang behauptet wird."""
-    def spread(lengths: list[int]) -> float:
-        return burstiness(" ".join("x " * (n - 1) + "x." for n in lengths))
-
-    lengths = [len(p.split()) for p in parts]
-    if len(parts) < 2 or spread(lengths) >= 0.50:  # Abstand zur Prüfschwelle 0,45
-        return parts, 0
-    options = [(spread(lengths[:i] + [lengths[i] + lengths[i + 1]] + lengths[i + 2:]), i)
-               for i in range(len(parts) - 1) if lengths[i] + lengths[i + 1] <= 45] if len(parts) >= 3 else []
-    if not options or max(options)[0] <= spread(lengths):
-        return split_longest(source, parts, model, url, qualifiers, spread)
-    i = max(options)[1]
+def merge_pair(source: str, parts: list[str], i: int, model: str, url: str, qualifiers: list[str]) -> tuple[list[str], int]:
+    """Legt Satz i und i+1 zusammen, wenn dabei nichts verloren geht und kein neuer Zusammenhang entsteht."""
     pair = parts[i] + " " + parts[i + 1]
     request = ("Verbinde diese zwei Sätze zu einem einzigen Satz. Verbinde neutral: mit \"und\", einem Relativsatz, "
                "einem Doppelpunkt oder einem Semikolon. Kein \"obwohl\", \"sodass\", \"daher\", \"weil\", \"da\". Alle Zahlen und "
@@ -966,6 +954,31 @@ def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers:
             and issue_score(sentence_issues(source, merged)) <= issue_score(sentence_issues(source, parts[i]))
             + issue_score(sentence_issues(source, parts[i + 1])))
     return (parts[:i] + [merged] + parts[i + 2:], 1) if fine else (parts, 0)
+
+
+def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers: list[str],
+                attempts: int = 3) -> tuple[list[str], int]:
+    """Sind die Sätze eines Absatzes zu gleich lang, probiert die App der Reihe nach, was am meisten bringt: zwei
+    Nachbarn zusammenlegen oder den längsten Satz teilen. Der erste Eingriff, bei dem nichts verloren geht und kein
+    neuer Zusammenhang behauptet wird, gilt. Höchstens attempts Anfragen an das Modell."""
+    def spread(lengths: list[int]) -> float:
+        return burstiness(" ".join("x " * (n - 1) + "x." for n in lengths))
+
+    lengths = [len(p.split()) for p in parts]
+    if len(parts) < 2 or spread(lengths) >= 0.50:  # Abstand zur Prüfschwelle 0,45
+        return parts, 0
+    options = sorted(((spread(lengths[:i] + [lengths[i] + lengths[i + 1]] + lengths[i + 2:]), i)
+                      for i in range(len(parts) - 1) if lengths[i] + lengths[i + 1] <= 45), reverse=True) \
+        if len(parts) >= 3 else []
+    steps = [lambda i=i: merge_pair(source, parts, i, model, url, qualifiers)
+             for gain, i in options if gain > spread(lengths)]
+    # Teilen kommt nach dem besten Zusammenlegen, vor den schwächeren Varianten.
+    steps.insert(1 if steps else 0, lambda: split_longest(source, parts, model, url, qualifiers, spread))
+    for step in steps[:attempts]:
+        new, done = step()
+        if done:
+            return new, done
+    return parts, 0
 
 
 def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,

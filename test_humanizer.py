@@ -1124,3 +1124,21 @@ def test_rhythmus_greift_mit_abstand_zur_schwelle(monkeypatch):
              "Eins zwei drei vier fünf sechs sieben acht neun zehn elf zwölf."]
     h.vary_rhythm(" ".join(parts), list(parts), "m", "u", [])
     assert calls  # Streuung weit unter 0,50: das Modell wird gefragt
+
+
+def test_rhythmus_probiert_weiter_wenn_erster_versuch_scheitert(monkeypatch):
+    source = ("Die Halle öffnet am frühen Abend ihre Türen. Die Gäste suchen sich dann ihre Plätze. "
+              "Die Musik beginnt kurz darauf sehr leise. Die Technik prüft dabei noch die Anlage.")
+    parts = ["Am frühen Abend öffnet die Halle ihre Türen.", "Dann suchen sich die Gäste ihre Plätze.",
+             "Kurz darauf beginnt sehr leise die Musik.", "Dabei prüft die Technik noch die Anlage."]
+    good = "Am frühen Abend öffnet die Halle ihre Türen, und dann suchen sich die Gäste ihre Plätze."
+    replies = iter(["Die Musik beginnt, obwohl die Technik prüft.", good, good])
+    calls = []
+    monkeypatch.setattr(h, "_chat", lambda m, u, msgs: calls.append(msgs) or next(replies))
+    out, n = h.vary_rhythm(source, list(parts), "m", "u", [])
+    assert n == 1 and len(calls) >= 2
+    assert len(out) == 3 and not any("obwohl" in p for p in out)
+    # Mehr als attempts Anfragen gibt es nie.
+    calls.clear()
+    monkeypatch.setattr(h, "_chat", lambda m, u, msgs: calls.append(msgs) or "Nein.")
+    assert h.vary_rhythm(source, list(parts), "m", "u", []) == (parts, 0) and len(calls) <= 3

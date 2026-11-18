@@ -831,7 +831,23 @@ def keeps_content(source: str, old: str, new: str, qualifiers: list[str], loose:
 def clean_reply(reply: str) -> str:
     reply = flatten(reply)
     reply = re.sub(r"^(?:Satz|Neuer Satz|Umformulierung)\s*:\s*", "", reply, flags=re.I)
+    reply = strip_list_echo(reply)
     return reply.strip("\"„“”»«").strip()
+
+
+LIST_ECHO = re.compile(r"(?:\s*;\s*[^;.()]{1,25}?\.?)+\s*$")
+
+
+def strip_list_echo(text: str) -> str:
+    """Entfernt Anhängsel wie "(vgl. Müller 2018, S. 23); 20." oder "…; 2015; 67.": Das Modell hängt die Liste der
+    Pflichtangaben an den Satz. Ein echter Satzteil nach Semikolon hat ein Verb und bleibt."""
+    match = LIST_ECHO.search(text)
+    if not match:
+        return text
+    pieces = [p.strip(" .") for p in match.group(0).split(";") if p.strip(" .")]
+    if all(len(p.split()) <= 3 and (re.search(r"\d", p) or len(p.split()) == 1) for p in pieces):
+        return text[:match.start()].rstrip(" ,;") + ("." if not text[:match.start()].rstrip().endswith(".") else "")
+    return text
 
 
 STOCK_WORDS = [
@@ -1190,8 +1206,8 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
             parts, done = merge_pair(paragraph, parts, parts.index(a), model, url, qualifiers)
             merged += done
     parts, again = restore_facts(paragraph, parts)
-    stripped = [strip_stray_parens(paragraph, merge_doubled(strip_placeholders(strip_stock_words(paragraph, p, qualifiers))))
-                for p in parts]
+    stripped = [strip_list_echo(strip_stray_parens(paragraph, merge_doubled(strip_placeholders(
+        strip_stock_words(paragraph, p, qualifiers))))) for p in parts]
     again += sum(a != b for a, b in zip(stripped, parts))
     return " ".join(stripped), extra + repaired + restored + merged + again, qualifiers
 

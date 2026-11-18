@@ -1274,3 +1274,13 @@ def test_reparaturauftrag_und_wiederholungen():
     first = "Heute nutzen über 90 % der Bühnen in Deutschland und Österreich DMX-basierte Systeme (vgl. VLB 2022, S. 14)."
     echo = "Diese Systeme werden heutzutage in Deutschland und Österreich verwendet."
     assert h.drop_unfounded(first, [first, echo], strict=True) == [first]
+
+
+def test_pflichtliste_als_anhaengsel():
+    assert h.strip_list_echo("Technik und Gesellschaft hingen zusammen (vgl. Müller 2018, S. 23); 20.") == \
+        "Technik und Gesellschaft hingen zusammen (vgl. Müller 2018, S. 23)."
+    assert h.strip_list_echo("Die Technik eröffnete Möglichkeiten (vgl. Huber 2015, S. 67); 2015; 67.") == \
+        "Die Technik eröffnete Möglichkeiten (vgl. Huber 2015, S. 67)."
+    real = "Die Halle war voll; die Gäste tanzten bis zum Morgen."
+    assert h.strip_list_echo(real) == real
+    assert h.clean_reply("Satz: Licht kam 1881 auf; 1881.") == "Licht kam 1881 auf."

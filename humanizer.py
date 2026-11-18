@@ -474,6 +474,23 @@ def crutches(result: str) -> list[str]:
 CITATION = re.compile(r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)", re.I)
 
 
+PLACEHOLDER = re.compile(r"\s*(?:\(\s*(?:vgl\.\s*|siehe\s*)?\[[^\]]*\]\s*\)|\[\s*(?:Quelle|Autor|Jahr|Seite|Zitat|Beleg|Ref)[^\]]*\]"
+                         r"|\(\s*(?:vgl\.|siehe)\s*(?:Quelle|Autor|o\.\s*A\.)?\s*\))", re.I)
+
+
+def invented_citations(source: str, result: str) -> list[str]:
+    """Quellenangaben und Platzhalter wie "(vgl. [Quelle])" in der Ausgabe, die im Original nicht stehen."""
+    have = set(CITATION.findall(source))
+    found = [c for c in CITATION.findall(result) if c not in have] + \
+            [m.group(0).strip() for m in PLACEHOLDER.finditer(result) if m.group(0).strip() not in source]
+    return list(dict.fromkeys(found))
+
+
+def strip_placeholders(text: str) -> str:
+    """Entfernt Platzhalter-Quellen, die das Modell erfunden hat. Echte Quellenangaben bleiben."""
+    return re.sub(r"\s+([.,;:])", r"\1", PLACEHOLDER.sub("", text))
+
+
 def citation_parts(citation: str) -> tuple[list[str], list[str]]:
     """Autorennamen und Zahlen (Jahr, Seite) einer Quellenangabe wie "(vgl. Hofer/Lindner 2019, S. 112)"."""
     inner = re.sub(r"^\((?:vgl\.|siehe|s\.|nach|zit\. n\.)\s*", "", citation, flags=re.I).rstrip(")")
@@ -758,12 +775,15 @@ def sentence_issues(source: str, sentence: str) -> dict[str, list[str]]:
         "wörtlich": unchanged_sentences(source, sentence)[:1],
         "verknüpfung": [connector_name(w) for words in CONNECTORS.values() for w in words
                         if re.search(r"\b%s\b" % w, sentence, re.I) and not re.search(r"\b%s\b" % w, source, re.I)],
+        "unbelegt": unsupported_clauses(source, sentence) + [s for s in added_negations(source, sentence)][:1]
+        + invented_citations(source, sentence),
     }
     return {k: v for k, v in issues.items() if v}
 
 
 def issue_score(issues: dict[str, list[str]]) -> int:
-    return len(issues.get("floskel", [])) + 2 * len(issues.get("wörtlich", [])) + 2 * len(issues.get("verknüpfung", []))
+    return (len(issues.get("floskel", [])) + 2 * len(issues.get("wörtlich", [])) + 2 * len(issues.get("verknüpfung", []))
+            + 3 * len(issues.get("unbelegt", [])))
 
 
 REPAIR_SYSTEM = ("Du formulierst einzelne deutsche Sätze um. Du gibst nur den neuen Satz aus, ohne Kommentar und ohne "
@@ -782,6 +802,9 @@ def repair_request(sentence: str, issues: dict[str, list[str]]) -> str:
         lines.append("Die Wörter " + ", ".join(f'"{w}"' for w in issues["verknüpfung"]) + " behaupten einen "
                      "Zusammenhang, der nicht belegt ist. Verbinde die Aussagen neutral (mit \"und\", Relativsatz oder "
                      "Doppelpunkt) oder mach zwei Sätze daraus.")
+    if "unbelegt" in issues:
+        lines.append("Diese Teile stehen nicht in der Vorlage, lass sie weg: " + " / ".join(f'"{u}"' for u in issues["unbelegt"])
+                     + ". Erfinde keine Quelle, keine Verneinung und keine Begründung.")
     keep = list(dict.fromkeys(CITATION.findall(sentence) + [surface for _, _, surface in facts(sentence)]))
     if keep:
         lines.append("Diese Angaben bleiben wörtlich: " + "; ".join(keep))
@@ -798,7 +821,8 @@ def keeps_content(source: str, old: str, new: str, qualifiers: list[str], loose:
             and not missing_facts(old, new) and all(c in new for c in CITATION.findall(old))
             and not added_facts(source, new) and not unsupported_sentences(source, new)
             and not missing_qualifiers(carried, new) and not missing_hedges(extract_hedges(old), new)
-            and _negations(new) >= _negations(old))
+            and _negations(new) >= _negations(old) - (1 if added_negations(source, old) else 0)
+            and not added_negations(source, new) and not invented_citations(source, new))
 
 
 def clean_reply(reply: str) -> str:
@@ -896,6 +920,36 @@ def statement_stems(sentence: str) -> set[str]:
     return {w for w in core_stems(low) if not w.startswith(VERDICT_STEMS + STOCK_STEMS)}
 
 
+CLAUSE_SPLIT = re.compile(r",\s+|:\s+|;\s+|\s+(?=und (?:es|sie|er|das|dies|man|zudem|damit|so)\b)")
+
+
+def unsupported_clauses(source: str, result: str) -> list[str]:
+    """Teilsätze ohne Grundlage im Original, auch in sonst passenden Sätzen: "…, und es gibt keine Belege für einen
+    Zusammenhang." Zählt nur Teilsätze mit mindestens vier Wörtern und zwei Kernwörtern, von denen weniger als ein
+    Drittel im Original vorkommt."""
+    have = core_stems(source.lower())
+    found = []
+    for sentence in raw_sentences(result):
+        for clause in CLAUSE_SPLIT.split(CITATION.sub(" ", PLACEHOLDER.sub(" ", sentence))):
+            stems = {w for w in core_stems(clause.lower()) if not w.startswith(STOCK_STEMS)}
+            if len(clause.split()) >= 4 and len(stems) >= 2 and len(stems & have) / len(stems) < 0.34:
+                found.append(re.sub(r"\s+", " ", clause).strip(" .!?"))
+    return found
+
+
+def added_negations(source: str, result: str) -> list[str]:
+    """Sätze der Ausgabe mit einer Verneinung, die ihr Gegenstück im Original nicht hat."""
+    originals = raw_sentences(source)
+    found = []
+    for sentence in raw_sentences(result):
+        if not _negations(sentence) or not originals:
+            continue
+        best = max(originals, key=lambda o: overlap(sentence, o))
+        if not _negations(best):  # mehr Verneinungen als das Original sind oft nur "weder … noch"; erfunden ist nur eine ganz neue
+            found.append(sentence)
+    return found
+
+
 def dropped_statements(source: str, result: str) -> list[str]:
     """Sätze des Originals, deren eigentliche Aussage in der Ausgabe so gut wie nicht mehr vorkommt."""
     have = core_stems(result.lower())
@@ -969,6 +1023,11 @@ def restore_facts(source: str, parts: list[str], complete: bool = False) -> tupl
         # Eine Aussage der Vorlage, von der in der Ausgabe so gut wie nichts mehr steht, eine verlorene Verneinung
         # ("sind keine Gegensätze") oder eine verlorene Abschwächung ("gilt häufig", "muss").
         lost = [o for o in dropped_statements(source, text) + missing_negations(source, text) if o not in parts]
+        bad = next((i for i, p in enumerate(parts) if p not in originals and (added_negations(source, p)
+                                                                              or invented_citations(source, p))), None)
+        if bad is not None and not lost:
+            put(max(originals, key=lambda o: overlap(o, parts[bad])), bad)
+            continue
         for hedge in missing_hedges(extract_hedges(source), text):
             lost += [o for o in originals if hedge in extract_hedges(o) and o not in parts][:1]
         if not lost:
@@ -1085,7 +1144,7 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
             parts, done = merge_pair(paragraph, parts, parts.index(a), model, url, qualifiers)
             merged += done
     parts, again = restore_facts(paragraph, parts)
-    stripped = [strip_stock_words(paragraph, p, qualifiers) for p in parts]
+    stripped = [strip_placeholders(strip_stock_words(paragraph, p, qualifiers)) for p in parts]
     again += sum(a != b for a, b in zip(stripped, parts))
     return " ".join(stripped), extra + repaired + restored + merged + again, qualifiers
 
@@ -1196,7 +1255,7 @@ def core_stems(text: str) -> set[str]:
 
 CONNECTORS = {
     "Gegensatz": ["obwohl", "obgleich", "obschon", "trotzdem", "dennoch", "jedoch", "allerdings", "wenngleich"],
-    "Folge": ["sodass", "wodurch", "daher", "deshalb", "deswegen", "folglich", "somit", "weshalb", "infolgedessen"],
+    "Folge": ["sodass", "wodurch", "dadurch", "daher", "deshalb", "deswegen", "folglich", "somit", "weshalb", "infolgedessen"],
     # "da" nur als Bindewort nach Komma, sonst träfe es jedes "da ist"
     "Grund": ["weil", "denn", "(?<=, )da"],
 }
@@ -1441,6 +1500,12 @@ def warnings(source: str, result: str, qualifiers: list[str] | None = None, stri
         parts.append(f'Verneinung fehlt: "{sentence[:60]}"')
     for sentence in [x for a, b in pairs for x in dropped_statements(a, b)]:
         parts.append(f'Aussage fehlt: "{sentence[:60]}"')
+    for clause in [x for a, b in pairs for x in unsupported_clauses(a, b)]:
+        parts.append(f'Teilsatz ohne Grundlage, prüfen: "{clause[:60]}"')
+    for sentence in [x for a, b in pairs for x in added_negations(a, b)]:
+        parts.append(f'Verneinung dazugekommen: "{sentence[:60]}"')
+    if invented_citations(source, result):
+        parts.append("Quelle erfunden: " + ", ".join(invented_citations(source, result)))
     for sentence in filler_sentences(result):
         parts.append(f'Füllsatz: "{sentence}"')
     for citation, _ in misplaced_citations(source, result):

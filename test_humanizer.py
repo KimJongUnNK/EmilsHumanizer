@@ -1001,7 +1001,7 @@ def test_satz_probleme():
     issues = h.sentence_issues(source, "Das Personal wird geschult, obwohl das eine entscheidende Rolle spielt.")
     assert issues["verknüpfung"] == ["obwohl"] and "entscheidende rolle" in issues["floskel"]
     assert h.sentence_issues(source, "Das Personal wird geschult.") == {"wörtlich": ["Das Personal wird geschult."]}
-    assert h.sentence_issues(source, "Geschult werden alle Leute im Team.") == {}
+    assert h.sentence_issues(source, "Geschult wird das gesamte Personal.") == {}
 
 
 def test_streichen_ohne_modell():
@@ -1213,3 +1213,23 @@ def test_fehlende_aussage_abschwaechung_und_verneinung_kommen_zurueck():
     text = " ".join(out)
     assert n >= 3 and "häufig" in text and "auseinandersetzen" in text and "keine Flexibilität" in text
     assert not h.missing_facts(src, text)
+
+
+def test_erfundene_quellen_teilsaetze_und_verneinungen():
+    src = "Die Anforderungen haben sich in den letzten Jahren deutlich verschärft (vgl. Berger 2021, S. 45)."
+    out = ("Die Anforderungen haben sich zuletzt merklich verschärft (vgl. Berger 2021, S. 45), und es gibt keine "
+           "Belege für einen Zusammenhang (vgl. [Smith, 2020]).")
+    assert h.invented_citations(src, out) == ["(vgl. [Smith, 2020])"]
+    assert h.strip_placeholders(out).endswith("Zusammenhang.")
+    assert h.unsupported_clauses(src, out) == ["und es gibt keine Belege für einen Zusammenhang"]
+    assert h.added_negations(src, out) == [out]
+    issues = h.sentence_issues(src, out)
+    assert "unbelegt" in issues and h.issue_score(issues) >= 6
+    assert "lass sie weg" in h.repair_request(out, issues)
+    # Eine Reparatur darf keine Quelle und keine Verneinung erfinden.
+    assert not h.keeps_content(src, src, "Die Anforderungen sind nicht mehr dieselben (vgl. Berger 2021, S. 45).", [])
+    # "weder … noch" für "nicht mehr" ist keine neue Verneinung.
+    assert h.added_negations("Fördermittel reichen in Städten nicht mehr aus.",
+                             "Fördermittel reichen nicht, weder in Städten noch auf dem Land.") == []
+    warn = h.warnings(src, out, strict=True)
+    assert "Quelle erfunden" in warn and "Teilsatz ohne Grundlage" in warn and "Verneinung dazugekommen" in warn

@@ -1132,10 +1132,16 @@ def test_rhythmus_probiert_weiter_wenn_erster_versuch_scheitert(monkeypatch):
               "Die Musik beginnt kurz darauf sehr leise. Die Technik prüft dabei noch die Anlage.")
     parts = ["Am frühen Abend öffnet die Halle ihre Türen.", "Dann suchen sich die Gäste ihre Plätze.",
              "Kurz darauf beginnt sehr leise die Musik.", "Dabei prüft die Technik noch die Anlage."]
-    good = "Am frühen Abend öffnet die Halle ihre Türen, und dann suchen sich die Gäste ihre Plätze."
-    replies = iter(["Die Musik beginnt, obwohl die Technik prüft.", good, good])
     calls = []
-    monkeypatch.setattr(h, "_chat", lambda m, u, msgs: calls.append(msgs) or next(replies))
+
+    def chat(m, u, msgs):
+        calls.append(msgs)
+        if len(calls) == 1:
+            return "Die Musik beginnt, obwohl die Technik prüft."
+        pair = msgs[-1]["content"].split("Sätze: ", 1)[-1]  # die angefragten zwei Sätze, neutral verbunden
+        first, second = h.raw_sentences(pair)
+        return first.rstrip(".") + ", und " + second[0].lower() + second[1:]
+    monkeypatch.setattr(h, "_chat", chat)
     out, n = h.vary_rhythm(source, list(parts), "m", "u", [])
     assert n == 1 and len(calls) >= 2
     assert len(out) == 3 and not any("obwohl" in p for p in out)
@@ -1245,3 +1251,16 @@ def test_doppelte_haelfte_und_klammerreste():
     assert h.merge_doubled(plain) == plain
     assert h.strip_stray_parens("Balance finden.", "eine Balance (die) zu finden.") == "eine Balance zu finden."
     assert h.strip_stray_parens("Licht (LED) spart.", "Licht (LED) spart.") == "Licht (LED) spart."
+
+
+def test_reparatur_behaelt_die_aussage():
+    source = ("Veranstalter stehen nicht nur vor ökonomischen, sondern auch vor ökologischen und sozialen "
+              "Herausforderungen. Besucher erwarten zunehmend verantwortungsvolle Events. Ein Festival hat 50.000 Gäste.")
+    old = h.raw_sentences(source)[0]
+    # Ein anderer Satz desselben Absatzes ist keine Reparatur.
+    assert not h.keeps_content(source, old, "Besucher erwarten zunehmend verantwortungsvolle Events.", [])
+    # Zahlen aus anderen Sätzen dürfen nicht hereinwandern.
+    assert not h.keeps_content(source, "Besucher erwarten zunehmend verantwortungsvolle Events.",
+                               "Bei 50.000 Gästen erwarten Besucher zunehmend verantwortungsvolle Events.", [])
+    assert h.keeps_content(source, old, "Ökonomische, ökologische und soziale Herausforderungen kommen auf "
+                                        "Veranstalter zu.", [])

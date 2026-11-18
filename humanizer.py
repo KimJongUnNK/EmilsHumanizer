@@ -822,7 +822,8 @@ def keeps_content(source: str, old: str, new: str, qualifiers: list[str], loose:
             and not added_facts(source, new) and not unsupported_sentences(source, new)
             and not missing_qualifiers(carried, new) and not missing_hedges(extract_hedges(old), new)
             and _negations(new) >= _negations(old) - (1 if added_negations(source, old) else 0)
-            and not added_negations(source, new) and not invented_citations(source, new))
+            and not added_negations(source, new) and not invented_citations(source, new)
+            and keeps_statement(old, new) and not added_facts(old, new))
 
 
 def clean_reply(reply: str) -> str:
@@ -950,13 +951,21 @@ def added_negations(source: str, result: str) -> list[str]:
     return found
 
 
+def keeps_statement(old: str, new: str) -> bool:
+    """Sagt die neue Fassung noch dasselbe wie die alte? Mindestens die Hälfte der Aussage-Kernwörter muss bleiben,
+    damit eine Reparatur nicht einen ganz anderen Satz des Absatzes liefert."""
+    stems = statement_stems(old)
+    return len(stems) < 3 or len(stems & core_stems(new.lower())) / len(stems) >= 0.5
+
+
 def doubled_clauses(sentence: str) -> tuple[str, str] | None:
     """Zwei Hälften eines Satzes, die dasselbe sagen: "… wurde durch die Loveparade deutlich und die Loveparade zeigte
     die Folgen …". Liefert (behaltene Hälfte, doppelte Hälfte) oder None."""
     for match in re.finditer(r",? und ", sentence):
         first, second = sentence[:match.start()], sentence[match.end():]
         a, b = core_stems(CITATION.sub(" ", first)), core_stems(CITATION.sub(" ", second))
-        if len(a & b) >= 4 and len(a & b) / min(len(a), len(b)) >= 0.5:
+        same_fact = {f for _, f, _ in facts(first)} & {f for _, f, _ in facts(second)}
+        if (len(a & b) >= 4 and len(a & b) / min(len(a), len(b)) >= 0.5) or (same_fact and len(a & b) >= 2):
             return first, second
     return None
 

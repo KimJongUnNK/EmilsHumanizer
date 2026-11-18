@@ -25,7 +25,7 @@ Die App garantiert nicht, dass ein Text an KI-Detektoren vorbeikommt. Lokale Mod
 ## Bedienung
 
 1. Modell und Stil oben auswählen. Die Liste zeigt alle in Ollama installierten Modelle.
-2. Text links einfügen.
+2. Text links einfügen oder mit **Text laden …** aus Word, PDF oder .txt holen. Optional mit **Quellen …** Literaturverzeichnis und Quellen laden.
 3. **Umschreiben** klicken oder Strg+Enter drücken.
 4. Ergebnis rechts prüfen und mit **Kopieren** übernehmen.
 
@@ -75,6 +75,24 @@ Die Statuszeile zeigt den Fortschritt ("Absatz 3 von 6") und am Ende, wie oft ei
 
 Nicht erkannt werden verdrehte Zusammenhänge ohne Signalwort ("das Konzept begrenzt die Dichte" statt "die Verordnung schreibt sie vor"), erfundene Teilsätze in sonst passenden Sätzen und Wiederholungen mit ganz anderen Worten. Ein Satz, der fast nur aus Synonymen besteht, kann umgekehrt fälschlich als "ohne Grundlage" gemeldet werden. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
 
+## Zitate und Quellen
+
+Für Uni-Texte gilt: Direkte Zitate und Quellenangaben bleiben Zeichen für Zeichen, wie sie sind.
+
+- **Zitate** in „…“, »…« oder "…" und **Quellenangaben** in Klammern ersetzt die App vor dem Umschreiben durch Platzhalter (⟦Za⟧, ⟦Qa⟧). Das Modell sieht sie gar nicht und kann sie weder umformulieren noch übersetzen; danach setzt die App sie wieder ein. Fehlt ein Platzhalter, kommt der Originalsatz zurück.
+- Erkannt werden Angaben mit und ohne "vgl.", mit Jahr oder "o. J.", auch mehrere in einer Klammer: "(Grösel, 2007, S. 94)", "(vgl. Britannica Editors, o. J.)", "(vgl. Koch, 1993, S. 31; Semper, 1904, S. 323 f.)".
+- **Zuschreibungen** bleiben: Nennt ein Satz den Autor im Fließtext ("Nach Koch …", "Tsuboi verweist …"), muss der Name auch in der Umformulierung stehen, sonst wird aus der Wiedergabe eine eigene Behauptung. Indirekte Rede bleibt im Konjunktiv ("Eine Drehscheibe biete …").
+- **Überschriften** wie "2.1 Vorformen in der Antike" bleiben stehen, auch wenn Absätze nur mit einfachem Zeilenumbruch getrennt sind (wie beim Kopieren aus Word). Die Zeilenstruktur der Ausgabe entspricht dem Original.
+- **Hinweise zum Original:** Eine nicht geschlossene Klammer oder ein doppelter Satz im Original wird gemeldet, aber nicht verändert.
+
+**Text laden …** holt den Text direkt aus einer Word-Datei (.docx), PDF oder .txt.
+
+**Quellen …** lädt dein Literaturverzeichnis und/oder die Quellen selbst (.docx, .pdf, .txt). Nach dem Umschreiben prüft die App:
+- ob jedes direkte Zitat in den Quellen vorkommt (Groß/Klein, Zeilenumbrüche, Silbentrennung und Anführungszeichen egal),
+- ob Autor und Jahr jeder Quellenangabe in den Quellen vorkommen.
+
+Die Quellen dienen nur zum Prüfen. Ihr Inhalt geht nicht ans Modell, und nichts verlässt den Rechner. Ob ein Zitat auf der angegebenen *Seite* steht, prüft die App nicht. Gescannte PDFs ohne Textebene kann sie nicht lesen und sagt das.
+
 ## Update
 
 Der Knopf **Update** oben rechts prüft, ob es eine neuere Version gibt. Wenn ja, lädt die App sie nach einer Rückfrage herunter, ersetzt sich selbst und startet neu. Die App prüft nur auf Klick, nie von allein. Wer aus dem Quelltext startet, lädt die neue Version selbst von dieser Seite.
@@ -98,7 +116,7 @@ Die Werte sind Richtwerte. Reicht der Grafikspeicher nicht, läuft ein Modell ü
 
 ## Aus dem Quelltext starten (Windows, macOS, Linux)
 
-Braucht Python 3.10 oder neuer, keine Zusatzpakete. [ZIP herunterladen](https://github.com/KimJongUnNK/EmilsHumanizer/archive/refs/heads/main.zip), entpacken und im Ordner:
+Braucht Python 3.10 oder neuer. Für PDFs zusätzlich `pip install pypdf` (Word-Dateien gehen ohne). [ZIP herunterladen](https://github.com/KimJongUnNK/EmilsHumanizer/archive/refs/heads/main.zip), entpacken und im Ordner:
 
 ```
 python humanizer.py

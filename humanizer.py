@@ -471,7 +471,65 @@ def crutches(result: str) -> list[str]:
 
 
 
-CITATION = re.compile(r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)", re.I)
+# Quellenangaben in Klammern: mit "vgl." und einer Zahl, oder mit Autorenname und Jahr bzw. "o. J." ("(Grösel, 2007,
+# S. 94)", "(vgl. Britannica Editors, o. J.)", "(vgl. Koch, 1993, S. 31; Semper, 1904, S. 323 f.)"). Dazu die
+# Platzhalter ⟦Qa⟧ und ⟦Za⟧, für die Quellenangaben und Zitate vor dem Modell versteckt werden.
+CITATION = re.compile(
+    r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)"
+    r"|\((?:(?:vgl\.|siehe|s\.|nach|zit\.\s*n\.)\s*)?[A-ZÄÖÜ][^()]*?"
+    r"(?:\b1[4-9]\d\d[a-z]?\b|\b20\d\d[a-z]?\b|\bo\.\s?J\.|\bn\.\s?d\.)[^()]*\)"
+    r"|⟦[QZ][a-z]+⟧", re.I)
+TOKEN = re.compile(r"⟦[QZ][a-z]+⟧")
+# Direkte Zitate: „…“, »…«, "…".
+QUOTE = re.compile(r"„[^„“”\n]{1,800}?[“”]|»[^»«\n]{1,800}?«|\"[^\"\n]{1,800}?\"")
+
+
+def _token(kind: str, i: int) -> str:
+    letters = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        letters = chr(97 + r) + letters
+    return f"⟦{kind}{letters}⟧"
+
+
+def protect(text: str) -> tuple[str, dict[str, str]]:
+    """Ersetzt direkte Zitate und Quellenangaben durch Platzhalter, damit das Modell sie nicht verändern kann.
+    Liefert den Text mit Platzhaltern und die Zuordnung Platzhalter → Original."""
+    mapping: dict[str, str] = {}
+
+    def swap(kind: str):
+        def inner(m: re.Match) -> str:
+            if TOKEN.fullmatch(m.group(0)):
+                return m.group(0)
+            token = _token(kind, sum(1 for k in mapping if k[1] == kind))
+            mapping[token] = m.group(0)
+            return token
+        return inner
+    text = QUOTE.sub(swap("Z"), text)
+    text = CITATION.sub(swap("Q"), text)
+    return text, mapping
+
+
+# Zuordnung Platzhalter → Original des Absatzes, der gerade umgeschrieben wird. Jede Modellantwort läuft durch
+# normalize_tokens(), auch die der Satz-Reparatur.
+_ACTIVE: dict[str, str] = {}
+
+
+def normalize_tokens(text: str, mapping: dict[str, str] | None = None) -> str:
+    """Bringt Platzhalter, die das Modell leicht verändert ("[Qa]", "⟦ Qa ⟧"), in die richtige Form. Hat es statt
+    eines Platzhalters das Zitat selbst wörtlich hingeschrieben, wird daraus wieder der Platzhalter."""
+    text = re.sub(r"[⟦\[]\s*([QZ])\s*([a-z]+)\s*[⟧\]]", r"⟦\1\2⟧", text)
+    for token, original in (_ACTIVE if mapping is None else mapping).items():
+        if token not in text and original in text:
+            text = text.replace(original, token, 1)
+    return text
+
+
+def unprotect(text: str, mapping: dict[str, str]) -> str:
+    for token, original in mapping.items():
+        text = text.replace(token, original)
+    return text
 
 
 PLACEHOLDER = re.compile(r"\s*(?:\([^()]*\[[^\]]*\][^()]*\)|\[\s*(?:Quelle|Autor|Name|Jahr|Seite|Zitat|Beleg|Ref|Titel|Ort)[^\]]*\]"
@@ -529,7 +587,7 @@ def paragraph_pool(texts: list[str]) -> list[tuple[int, list[int], str]]:
     """Alle Absätze echter Texte als (Wortzahl, Satzlängen, Absatz), soweit sie als Bauplan taugen."""
     pool = []
     for text in texts:
-        for p in paragraphs(text):
+        for p in raw_paragraphs(text):
             lengths = [len(s.split()) for s in sentences(p)]
             if 2 <= len(lengths) <= 9 and all(1 <= n <= 70 for n in lengths):
                 pool.append((sum(lengths), lengths, p))
@@ -764,7 +822,7 @@ def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str
 
 def flatten(paragraph: str) -> str:
     """Zeilenumbrüche, die das Modell mitten in einen Absatz setzt, werden zu Leerzeichen."""
-    return re.sub(r"\s*\n+\s*", " ", paragraph).strip()
+    return normalize_tokens(re.sub(r"\s*\n+\s*", " ", paragraph).strip())
 
 
 def sentence_issues(source: str, sentence: str) -> dict[str, list[str]]:
@@ -788,7 +846,8 @@ def issue_score(issues: dict[str, list[str]]) -> int:
 
 REPAIR_SYSTEM = ("Du formulierst einzelne deutsche Sätze um. Du gibst nur den neuen Satz aus, ohne Kommentar und ohne "
                  "Anführungszeichen. Du fügst keine Information hinzu und lässt keine weg. Zahlen, Namen und "
-                 "Quellenangaben in Klammern bleiben Zeichen für Zeichen gleich.")
+                 "Quellenangaben in Klammern bleiben Zeichen für Zeichen gleich. Platzhalter wie ⟦Qa⟧ (Quellenangabe) "
+                 "oder ⟦Za⟧ (wörtliches Zitat) übernimmst du unverändert und genau einmal.")
 
 
 def repair_request(sentence: str, issues: dict[str, list[str]]) -> str:
@@ -845,7 +904,7 @@ def strip_list_echo(text: str) -> str:
     if not match:
         return text
     pieces = [p.strip(" .") for p in match.group(0).split(";") if p.strip(" .")]
-    if all(len(p.split()) <= 3 and (re.search(r"\d", p) or len(p.split()) == 1) for p in pieces):
+    if all(len(p.split()) <= 3 and (re.search(r"\d", p) or len(p.split()) == 1) and not TOKEN.search(p) for p in pieces):
         return text[:match.start()].rstrip(" ,;") + ("." if not text[:match.start()].rstrip().endswith(".") else "")
     return text
 
@@ -1187,6 +1246,29 @@ def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers:
 
 def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,
                       rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
+    """Versteckt Zitate und Quellenangaben hinter Platzhaltern, schreibt den Absatz um und setzt sie danach Zeichen
+    für Zeichen wieder ein. Das Modell kann sie so weder umformulieren noch übersetzen."""
+    masked, mapping = protect(paragraph)
+    quotes = {t: o for t, o in mapping.items() if t.startswith("⟦Z")}
+    legend = ("Platzhalter: ⟦Qa⟧, ⟦Qb⟧ … sind Quellenangaben, ⟦Za⟧, ⟦Zb⟧ … wörtliche Zitate. Übernimm jeden genau "
+              "einmal und unverändert, im Satz mit derselben Aussage. Schreib nie den Zitattext selbst hin. Zur "
+              "Orientierung, was die Zitate sagen:\n" + "\n".join(f"{t} = {o}" for t, o in quotes.items()) + "\n\n"
+              if mapping else "")
+    _ACTIVE.clear()
+    _ACTIVE.update(mapping)
+    try:
+        text, extra, qualifiers = _rewrite_masked(masked, style, model, url, pool, retries, rng, avoid, legend, mapping)
+    finally:
+        _ACTIVE.clear()
+    text = normalize_tokens(text, mapping)
+    if any(t not in text for t in mapping):  # Sicherheitsnetz: ohne alle Platzhalter lieber das Original
+        return paragraph, extra, [unprotect(q, mapping) for q in qualifiers]
+    return unprotect(text, mapping), extra, [unprotect(q, mapping) for q in qualifiers]
+
+
+def _rewrite_masked(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,
+                    rng: random.Random | None = None, avoid: list[str] | None = None, legend: str = "",
+                    mapping: dict[str, str] | None = None) -> tuple[str, int, list[str]]:
     """Schreibt einen Absatz nach Bauplan um und repariert ihn danach Satz für Satz.
 
     1. Entwurf nach Bauplan; ist er grob daneben, höchstens retries neue Entwürfe mit Rückmeldung.
@@ -1202,7 +1284,7 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
     strict = style == "Akademisch"
     plan, example = sentence_plan(paragraph, pool, rng, strict)
     messages = [{"role": "system", "content": system_prompt(style, [example] if example else [])},
-                {"role": "user", "content": paragraph_request(paragraph, plan, avoid, qualifiers)}]
+                {"role": "user", "content": legend + paragraph_request(paragraph, plan, avoid, qualifiers)}]
     draft = flatten(_chat(model, url, messages))
     score, extra = paragraph_badness(paragraph, draft, plan, avoid, qualifiers, strict), 0
     for _ in range(retries):
@@ -1247,7 +1329,7 @@ def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, p
 
     Zurück kommen der Text, 1 plus die Zahl der Nachbesserungen und alle Einschränkungen, die erhalten bleiben sollten.
     """
-    paras = paragraphs(text)
+    paras, seps = split_blocks(text)
     todo = [i for i, p in enumerate(paras) if needs_rewrite(p)]
     # Die Wendungen sind von Anfang an verboten, nicht erst nach ihrem ersten Auftreten.
     out, extra, used, qualifiers = list(paras), 0, [name for _, name in HABITS], []
@@ -1257,7 +1339,7 @@ def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, p
         extra += more
         qualifiers += found
         used += [h for h in habits(out[i]) if h not in used]
-    return "\n\n".join(out), 1 + extra, qualifiers
+    return "".join(p + sep for p, sep in zip(out, seps)).strip(), 1 + extra, qualifiers
 
 
 FACT = re.compile(r"\d+(?:[.,:/-]\d+)*")
@@ -1562,7 +1644,43 @@ def echo_pairs(result: str) -> list[tuple[str, str]]:
     return pairs
 
 
+HEADING = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+\S.*|[^.!?;:]{1,80})$")
+
+
+def is_heading(line: str) -> bool:
+    """Kurze Zeile ohne Satzende, gern nummeriert ("2.1 Vorformen in Antike"): Überschrift, bleibt wie sie ist."""
+    line = line.strip()
+    return bool(line) and len(line.split()) <= 14 and not re.search(r"[.!?]\s*$", line) and bool(HEADING.match(line))
+
+
+def split_blocks(text: str) -> tuple[list[str], list[str]]:
+    """Teilt einen Text in Absätze und merkt sich, was dazwischen stand. Absätze trennt eine Leerzeile oder ein
+    einfacher Zeilenumbruch nach einem Satzende oder einer Überschrift, wie beim Kopieren aus Word. Ein Umbruch
+    mitten im Satz bleibt im Absatz. Liefert (Absätze, Trenner danach)."""
+    parts = re.split(r"(\n\s*)", text.strip())
+    blocks, seps, current = [], [], ""
+    for i in range(0, len(parts), 2):
+        line = parts[i]
+        sep = parts[i + 1] if i + 1 < len(parts) else ""
+        current = (current + " " + line.strip()).strip() if current else line.strip()
+        nxt = parts[i + 2] if i + 2 < len(parts) else ""
+        # Geht die nächste Zeile klein weiter, war es ein Umbruch mitten im Satz, keine Überschrift.
+        starts_new = bool(re.match(r"\s*[A-ZÄÖÜ0-9„\"»(]", nxt))
+        ends = re.search(r"[.!?:“”\")»«]\s*$", line) or (is_heading(line) and starts_new)
+        if not sep or sep.count("\n") > 1 or ends or is_heading(nxt):
+            if current:
+                blocks.append(current)
+                seps.append("\n\n" if sep.count("\n") > 1 else ("\n" if sep else ""))
+            current = ""
+    return blocks, seps
+
+
 def paragraphs(text: str) -> list[str]:
+    return split_blocks(text)[0]
+
+
+def raw_paragraphs(text: str) -> list[str]:
+    """Absätze nur an Leerzeilen, für die Stilvorlagen aus Büchern mit festen Zeilenumbrüchen."""
     return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
 

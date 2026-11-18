@@ -474,7 +474,7 @@ def crutches(result: str) -> list[str]:
 CITATION = re.compile(r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)", re.I)
 
 
-PLACEHOLDER = re.compile(r"\s*(?:\(\s*(?:vgl\.\s*|siehe\s*)?\[[^\]]*\]\s*\)|\[\s*(?:Quelle|Autor|Jahr|Seite|Zitat|Beleg|Ref)[^\]]*\]"
+PLACEHOLDER = re.compile(r"\s*(?:\([^()]*\[[^\]]*\][^()]*\)|\[\s*(?:Quelle|Autor|Name|Jahr|Seite|Zitat|Beleg|Ref|Titel|Ort)[^\]]*\]"
                          r"|\(\s*(?:vgl\.|siehe)\s*(?:Quelle|Autor|o\.\s*A\.)?\s*\))", re.I)
 
 
@@ -805,7 +805,9 @@ def repair_request(sentence: str, issues: dict[str, list[str]]) -> str:
     if "unbelegt" in issues:
         lines.append("Diese Teile stehen nicht in der Vorlage, lass sie weg: " + " / ".join(f'"{u}"' for u in issues["unbelegt"])
                      + ". Erfinde keine Quelle, keine Verneinung und keine Begründung.")
-    keep = list(dict.fromkeys(CITATION.findall(sentence) + [surface for _, _, surface in facts(sentence)]))
+    # Zahlen aus Quellenangaben nicht einzeln aufzählen, sonst hängt das Modell sie als "; 2015; 67" an den Satz.
+    keep = list(dict.fromkeys(CITATION.findall(sentence)
+                              + [surface for _, _, surface in facts(CITATION.sub(" ", sentence))]))
     if keep:
         lines.append("Diese Angaben bleiben wörtlich: " + "; ".join(keep))
     return "Formuliere diesen Satz neu.\n" + "\n".join(lines) + "\n\nSatz: " + sentence
@@ -873,7 +875,7 @@ def repair_sentences(source: str, parts: list[str], model: str, url: str, qualif
             if stripped != sentence:
                 parts[i], sentence, issues = stripped, stripped, sentence_issues(source, stripped)
                 done += 1
-        rounds = tries + (1 if "floskel" in issues else 0)
+        rounds = tries + (1 if "floskel" in issues or "wörtlich" in issues else 0)
         for attempt in range(rounds):
             if not issues:
                 break
@@ -905,6 +907,9 @@ def drop_unfounded(source: str, parts: list[str], strict: bool) -> list[str]:
             continue
         if sentence in filler_sentences(" ".join(parts)) and not missing_hedges(extract_hedges(sentence), rest):
             continue
+        if kept and not carries and sentence in repeated_sentences(" ".join(kept + [sentence])) \
+                and not missing_hedges(extract_hedges(sentence), rest):
+            continue  # wiederholt nur, was schon dasteht
         kept.append(sentence)
     return kept or parts[:1]
 
@@ -1363,7 +1368,7 @@ def repeated_sentences(result: str) -> list[str]:
     seen, repeated = [], []
     for sentence in sentences(result):
         stems = core_stems(sentence)
-        if len(stems) >= 4 and any(len(stems & s) / min(len(stems), len(s)) > 0.6 for s in seen):
+        if len(stems) >= 4 and any(len(stems & s) / min(len(stems), len(s)) >= 0.6 for s in seen):
             repeated.append(sentence)
         if len(stems) >= 4:
             seen.append(stems)

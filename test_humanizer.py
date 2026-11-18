@@ -1264,3 +1264,13 @@ def test_reparatur_behaelt_die_aussage():
                                "Bei 50.000 Gästen erwarten Besucher zunehmend verantwortungsvolle Events.", [])
     assert h.keeps_content(source, old, "Ökonomische, ökologische und soziale Herausforderungen kommen auf "
                                         "Veranstalter zu.", [])
+
+
+def test_reparaturauftrag_und_wiederholungen():
+    s = "Die Technik eröffnete neue Möglichkeiten (vgl. Huber 2015, S. 67)."
+    request = h.repair_request(s, {"wörtlich": [s]})
+    assert "Diese Angaben bleiben wörtlich: (vgl. Huber 2015, S. 67)\n" in request and "; 2015" not in request
+    assert h.strip_placeholders("Das prägte das Festivalformat (mit [Name]).") == "Das prägte das Festivalformat."
+    first = "Heute nutzen über 90 % der Bühnen in Deutschland und Österreich DMX-basierte Systeme (vgl. VLB 2022, S. 14)."
+    echo = "Diese Systeme werden heutzutage in Deutschland und Österreich verwendet."
+    assert h.drop_unfounded(first, [first, echo], strict=True) == [first]

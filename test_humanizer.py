@@ -1435,3 +1435,32 @@ def test_selbsttest_meldet_pdf(tmp_path):
 def test_abkuerzungen_in_quellenangaben():
     text = "Wien 1708 (vgl. Stadtarchiv Wien, o. J.). Danach kam mehr. Er war bei Koyo Seiko Co., Ltd. in Osaka tätig."
     assert len(h.raw_sentences(text)) == 3 and h.fragments(text) == []
+
+
+def test_lange_absaetze_werden_stueckweise_umgeschrieben():
+    saetze = [f"Satz {i} sagt etwas „mit einem Zitat. Und Punkt“ (vgl. Koch, 1993, S. {i})." for i in range(9)]
+    stuecke = h.chunks(" ".join(saetze))
+    assert [len(h.raw_sentences(h.protect(s)[0])) for s in stuecke] == [3, 3, 3]
+    assert " ".join(stuecke) == " ".join(saetze)  # nichts verloren, kein Zitat zerschnitten
+    assert h.chunks("Kurz. Auch kurz. Noch einer.") == ["Kurz. Auch kurz. Noch einer."]
+
+
+def test_doppelte_quellenangabe_faellt_weg():
+    teile = ["Koch nennt 1716 ⟦Qa⟧.", "Ein Beleg fehlt in unseren Quellen und ⟦Qa⟧.", "Sie waren einfach [⟦Qa⟧]."]
+    assert h.dedupe_tokens(teile) == ["Koch nennt 1716 ⟦Qa⟧.", "Ein Beleg fehlt in unseren Quellen.", "Sie waren einfach."]
+    assert h.dedupe_tokens(["Kurz.", "Lang ⟦Qa⟧ und ⟦Qb⟧."]) == ["Kurz.", "Lang ⟦Qa⟧ und ⟦Qb⟧."]
+
+
+def test_zitat_wird_nicht_nacherzaehlt():
+    mapping = {"⟦Za⟧": "„eine sehr einfache Möglichkeit zur Verwandlung des Bühnenbildes“", "⟦Qa⟧": "(Grösel, 2007, S. 94)"}
+    satz = "Eine Drehscheibe biete ⟦Za⟧ ⟦Qa⟧, was sie zu einer sehr einfachen Möglichkeit zur Verwandlung des Bühnenbildes macht."
+    assert h.strip_quote_echo([satz], mapping) == ["Eine Drehscheibe biete ⟦Za⟧ ⟦Qa⟧."]
+    anders = "Eine Drehscheibe biete ⟦Za⟧ ⟦Qa⟧, wobei Reinhardt sie später künstlerisch einsetzte."
+    assert h.strip_quote_echo([anders], mapping) == [anders]
+
+
+def test_wiederholung_mit_schon_genannter_quelle_faellt_weg():
+    teile = ["Brockett et al. datieren Leonardos Entwurf für Danae auf 1496 ⟦Qa⟧.",
+             "Leonardos Entwurf für Danae datieren Brockett et al. auf 1496 ⟦Qa⟧.",
+             "Leonardos Entwurf für Danae datieren Brockett et al. ebenfalls auf 1496 ⟦Qb⟧."]
+    assert h.drop_repeats(teile) == [teile[0], teile[2]]  # eigene Quelle ⟦Qb⟧ bleibt, sie steht im Original

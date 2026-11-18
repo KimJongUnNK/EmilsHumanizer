@@ -1167,12 +1167,43 @@ def drop_repeats(parts: list[str]) -> list[str]:
     kept = []
     for sentence in parts:
         rest = " ".join(kept)
-        unique = missing_facts(sentence, rest) or CITATION.search(sentence) or \
+        unique = missing_facts(sentence, rest) or any(c not in rest for c in CITATION.findall(sentence)) or \
             missing_hedges(extract_hedges(sentence), rest) or _negations(sentence) > _negations(rest)
-        if kept and not unique and sentence in repeated_sentences(" ".join(kept + [sentence])):
+        if kept and not unique and _mask(sentence).strip() in repeated_sentences(" ".join(kept + [sentence])):
             continue
         kept.append(sentence)
     return kept
+
+
+def dedupe_tokens(parts: list[str]) -> list[str]:
+    """Jeder Platzhalter einer Quellenangabe steht genau einmal. Setzt das Modell ihn ein zweites Mal, etwa in eckigen
+    Klammern "[⟦Qa⟧]" oder angehängt "… nicht enthalten und ⟦Qa⟧.", fällt die spätere Stelle weg."""
+    seen: set[str] = set()
+    out = []
+    for sentence in parts:
+        for token in dict.fromkeys(re.findall(r"⟦Q[a-z]+⟧", sentence)):
+            if token in seen:
+                sentence = re.sub(r"(?:\s*,)?(?:\s+(?:und|sowie|bzw\.|oder))?\s*\[?\s*" + re.escape(token) + r"\s*\]?",
+                                  "", sentence)
+            seen.add(token)
+        sentence = re.sub(r"\s+([.,;:!?])", r"\1", sentence).strip()
+        if re.search(r"\w", sentence):
+            out.append(sentence)
+    return out
+
+
+def strip_quote_echo(parts: list[str], mapping: dict[str, str]) -> list[str]:
+    """Streicht Nebensätze, die ein direktes Zitat noch einmal ohne Anführungszeichen nacherzählen, etwa
+    "… ⟦Za⟧ ⟦Qa⟧, was sie zu einer sehr einfachen Möglichkeit … macht." Der Inhalt steht ja schon im Zitat."""
+    quotes = [core_stems(o) for t, o in mapping.items() if t.startswith("⟦Z") and len(core_stems(o)) >= 3]
+    out = []
+    for sentence in parts:
+        end = sentence[-1] if sentence and sentence[-1] in ".!?" else ""
+        clauses = re.split(r",\s+", sentence[:-1] if end else sentence)
+        kept = clauses[:1] + [c for c in clauses[1:] if TOKEN.search(c) or not any(
+            len(core_stems(c) & q) / len(q) >= 0.7 and len(core_stems(c) - q) <= 2 for q in quotes)]
+        out.append(", ".join(kept) + end if len(kept) < len(clauses) else sentence)
+    return out
 
 
 def dropped_statements(source: str, result: str) -> list[str]:
@@ -1346,7 +1377,7 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
         _ACTIVE.clear()
         _NAMES.clear()
     text = normalize_tokens(text, mapping)
-    if any(t not in text for t in mapping):  # Sicherheitsnetz: ohne alle Platzhalter lieber das Original
+    if not text.strip() or any(t not in text for t in mapping):  # Sicherheitsnetz: lieber das Original
         return paragraph, extra, [unprotect(q, mapping) for q in qualifiers]
     return unprotect(text, mapping), extra, [unprotect(q, mapping) for q in qualifiers]
 
@@ -1396,10 +1427,45 @@ def _rewrite_masked(paragraph: str, style: str, model: str, url: str, pool: list
             parts, done = merge_pair(paragraph, parts, parts.index(a), model, url, qualifiers)
             merged += done
     parts, again = restore_facts(paragraph, parts)
-    stripped = drop_repeats([strip_list_echo(strip_stray_parens(paragraph, merge_doubled(strip_placeholders(
-        strip_stock_words(paragraph, p, qualifiers))))) for p in parts])
-    again += sum(a != b for a, b in zip(stripped, parts))
+    stripped = drop_repeats(strip_quote_echo(dedupe_tokens([strip_list_echo(strip_stray_parens(
+        paragraph, merge_doubled(strip_placeholders(strip_stock_words(paragraph, p, qualifiers))))) for p in parts]),
+        mapping or {}))
+    again += sum(a != b for a, b in zip(stripped, parts)) + abs(len(parts) - len(stripped))
     return " ".join(stripped), extra + repaired + restored + merged + again, qualifiers
+
+
+def chunks(paragraph: str) -> list[str]:
+    """Teilt einen langen Absatz (ab 6 Sätzen) in Stücke zu 3 bis 4 Sätzen. Ein lokales Modell hält bei kurzen
+    Stücken Aussagen, Zahlen und Quellen deutlich verlässlicher fest. Zitate werden nie zerschnitten."""
+    masked, mapping = protect(paragraph)
+    parts = raw_sentences(masked)
+    count = max(1, round(len(parts) / 3.5))
+    if count == 1:
+        return [paragraph]
+    size, extra = divmod(len(parts), count)
+    out, start = [], 0
+    for k in range(count):
+        end = start + size + (1 if k < extra else 0)
+        out.append(unprotect(" ".join(parts[start:end]), mapping))
+        start = end
+    return out
+
+
+def rewrite_block(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,
+                  rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
+    """Schreibt einen Absatz um, lange Absätze Stück für Stück."""
+    avoid = list(avoid or [])
+    texts, extra, qualifiers = [], 0, []
+    for piece in chunks(paragraph):
+        if not needs_rewrite(piece):
+            texts.append(piece)
+            continue
+        text, more, found = rewrite_paragraph(piece, style, model, url, pool, retries, rng, avoid)
+        texts.append(text)
+        extra += more
+        qualifiers += found
+        avoid += [h for h in habits(text) if h not in avoid]
+    return " ".join(texts), extra, qualifiers
 
 
 def needs_rewrite(paragraph: str) -> bool:
@@ -1420,7 +1486,7 @@ def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, p
     out, extra, used, qualifiers = list(paras), 0, [name for _, name in HABITS], []
     for step, i in enumerate(todo, start=1):
         progress(step, len(todo))
-        out[i], more, found = rewrite_paragraph(paras[i], style, model, url, pool or [], retries, rng, used)
+        out[i], more, found = rewrite_block(paras[i], style, model, url, pool or [], retries, rng, used)
         extra += more
         qualifiers += found
         used += [h for h in habits(out[i]) if h not in used]

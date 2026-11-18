@@ -1284,3 +1284,19 @@ def test_pflichtliste_als_anhaengsel():
     real = "Die Halle war voll; die Gäste tanzten bis zum Morgen."
     assert h.strip_list_echo(real) == real
     assert h.clean_reply("Satz: Licht kam 1881 auf; 1881.") == "Licht kam 1881 auf."
+
+
+def test_klammer_echo_wiederholung_und_umgestellte_verneinung():
+    src = "Letztendlich zeigt sich: Technischer Fortschritt und künstlerische Gestaltung sind keine Gegensätze, sondern bedingen einander."
+    out = ("Technischer Fortschritt und künstlerische Gestaltung bedingen sich gegenseitig. Diese Wechselwirkung "
+           "beweist, dass sie keine Gegensätze sind (so dass sich zeigt, dass sie keine Gegensätze sind). "
+           "Technik und künstlerische Gestaltung beeinflussen sich gegenseitig.")
+    assert h.missing_negations(src, out) == []
+    cleaned = h.strip_stray_parens(src, h.raw_sentences(out)[1])
+    assert cleaned == "Diese Wechselwirkung beweist, dass sie keine Gegensätze sind."
+    assert "so dass" in [w for w, _, _ in h.new_connectors(src, out)]
+    parts = h.raw_sentences(out)
+    assert h.drop_repeats(parts) == parts[:2]
+    # Klammern aus dem Original bleiben.
+    keep = "Die Halle (ein ehemaliger Lokschuppen am Stadtrand) fasst viele Gäste."
+    assert h.strip_stray_parens(keep, keep) == keep

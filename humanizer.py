@@ -1007,9 +1007,32 @@ def merge_doubled(sentence: str) -> str:
 STRAY_PAREN = re.compile(r"\s*\((?:[a-zäöüß]+(?:\s+[a-zäöüß]+)?)\)")
 
 
+ECHO_PAREN = re.compile(r"\s*\(([^()\d]{12,})\)")
+
+
 def strip_stray_parens(source: str, text: str) -> str:
-    """Entfernt Klammer-Reste wie "(die)", die das Modell hinterlässt und die im Original nicht stehen."""
-    return STRAY_PAREN.sub(lambda m: m.group(0) if m.group(0).strip() in source else "", text)
+    """Entfernt Klammer-Reste wie "(die)" und Klammern, die nur wiederholen, was im selben Satz schon steht
+    ("… keine Gegensätze sind (so dass sich zeigt, dass sie keine Gegensätze sind)"). Klammern aus dem Original bleiben."""
+    text = STRAY_PAREN.sub(lambda m: m.group(0) if m.group(0).strip() in source else "", text)
+
+    def echo(m: re.Match) -> str:
+        inner, rest = core_stems(m.group(1)), core_stems(text.replace(m.group(0), " "))
+        return "" if m.group(0).strip() not in source and inner and len(inner & rest) / len(inner) >= 0.6 else m.group(0)
+    return ECHO_PAREN.sub(echo, text)
+
+
+def drop_repeats(parts: list[str]) -> list[str]:
+    """Streicht am Ende Sätze, die nur einen früheren wiederholen und keine eigene Zahl, Quelle, Abschwächung oder
+    Verneinung tragen."""
+    kept = []
+    for sentence in parts:
+        rest = " ".join(kept)
+        unique = missing_facts(sentence, rest) or CITATION.search(sentence) or \
+            missing_hedges(extract_hedges(sentence), rest) or _negations(sentence) > _negations(rest)
+        if kept and not unique and sentence in repeated_sentences(" ".join(kept + [sentence])):
+            continue
+        kept.append(sentence)
+    return kept
 
 
 def dropped_statements(source: str, result: str) -> list[str]:
@@ -1206,8 +1229,8 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
             parts, done = merge_pair(paragraph, parts, parts.index(a), model, url, qualifiers)
             merged += done
     parts, again = restore_facts(paragraph, parts)
-    stripped = [strip_list_echo(strip_stray_parens(paragraph, merge_doubled(strip_placeholders(
-        strip_stock_words(paragraph, p, qualifiers))))) for p in parts]
+    stripped = drop_repeats([strip_list_echo(strip_stray_parens(paragraph, merge_doubled(strip_placeholders(
+        strip_stock_words(paragraph, p, qualifiers))))) for p in parts])
     again += sum(a != b for a, b in zip(stripped, parts))
     return " ".join(stripped), extra + repaired + restored + merged + again, qualifiers
 
@@ -1318,7 +1341,7 @@ def core_stems(text: str) -> set[str]:
 
 CONNECTORS = {
     "Gegensatz": ["obwohl", "obgleich", "obschon", "trotzdem", "dennoch", "jedoch", "allerdings", "wenngleich"],
-    "Folge": ["sodass", "wodurch", "dadurch", "daher", "deshalb", "deswegen", "folglich", "somit", "weshalb", "infolgedessen"],
+    "Folge": ["sodass", "so dass", "wodurch", "dadurch", "daher", "deshalb", "deswegen", "folglich", "somit", "weshalb", "infolgedessen"],
     # "da" nur als Bindewort nach Komma, sonst träfe es jedes "da ist"
     "Grund": ["weil", "denn", "(?<=, )da"],
 }
@@ -1492,7 +1515,13 @@ def missing_negations(source: str, result: str) -> list[str]:
         if not _negations(original):
             continue
         near = [s for s in outs if overlap(original, s) >= 0.3]
-        if not any(_negations(s) for s in near):
+        if any(_negations(s) for s in near):
+            continue
+        # Auch umgestellt zählt: "keine Gegensätze" steht noch, nur in einem anders gebauten Satz.
+        phrases = [m.group(0) for m in re.finditer(r"\b(?:nicht|kein\w*|nie|weder)\s+(?:\w+\s+){0,1}\w+", original, re.I)]
+        kept = any(_negations(s) and core_stems(" ".join(p.split()[1:])) and core_stems(" ".join(p.split()[1:])) <= core_stems(s)
+                   for p in phrases for s in outs)
+        if not kept:
             lost.append(original)
     return lost
 

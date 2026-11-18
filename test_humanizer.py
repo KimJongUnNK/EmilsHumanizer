@@ -1480,3 +1480,11 @@ def test_gehaeufte_quellen_werden_erkannt():
     assert not h.clumped_citations(src, "1896 bestätigen beide ⟦Qc⟧ ⟦Qd⟧.")
     parts, _ = h.restore_facts(src, ["Koch nennt 1716, Tsuboi 1758 ⟦Qa⟧ ⟦Qb⟧.", "1896 bestätigen beide ⟦Qc⟧ ⟦Qd⟧."])
     assert parts[0] == "Koch nennt 1716 ⟦Qa⟧, Tsuboi 1758 ⟦Qb⟧."
+
+
+def test_zitat_steht_nur_einmal_und_ohne_vorgesagten_text():
+    teile = ["Arnold und Pech nennen sie ⟦Za⟧ ⟦Qa⟧.", "Das fasst dieses Kapitel zusammen ⟦Za⟧."]
+    assert h.dedupe_tokens(teile) == ["Arnold und Pech nennen sie ⟦Za⟧ ⟦Qa⟧.", "Das fasst dieses Kapitel zusammen."]
+    mapping = {"⟦Za⟧": "„erste Versenkung“"}
+    assert h.strip_quote_echo(["Sie zählen andere Bauarten als erste Versenkung ⟦Za⟧."], mapping) == \
+        ["Sie zählen andere Bauarten als ⟦Za⟧."]

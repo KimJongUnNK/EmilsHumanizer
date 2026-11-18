@@ -1176,12 +1176,12 @@ def drop_repeats(parts: list[str]) -> list[str]:
 
 
 def dedupe_tokens(parts: list[str]) -> list[str]:
-    """Jeder Platzhalter einer Quellenangabe steht genau einmal. Setzt das Modell ihn ein zweites Mal, etwa in eckigen
-    Klammern "[⟦Qa⟧]" oder angehängt "… nicht enthalten und ⟦Qa⟧.", fällt die spätere Stelle weg."""
+    """Jeder Platzhalter eines Zitats oder einer Quellenangabe steht genau einmal. Setzt das Modell ihn ein zweites
+    Mal, etwa in eckigen Klammern "[⟦Qa⟧]" oder angehängt "… nicht enthalten und ⟦Qa⟧.", fällt die spätere Stelle weg."""
     seen: set[str] = set()
     out = []
     for sentence in parts:
-        for token in dict.fromkeys(re.findall(r"⟦Q[a-z]+⟧", sentence)):
+        for token in dict.fromkeys(TOKEN.findall(sentence)):
             if token in seen:
                 sentence = re.sub(r"(?:\s*,)?(?:\s+(?:und|sowie|bzw\.|oder))?\s*\[?\s*" + re.escape(token) + r"\s*\]?",
                                   "", sentence)
@@ -1222,6 +1222,10 @@ def strip_quote_echo(parts: list[str], mapping: dict[str, str]) -> list[str]:
     quotes = [core_stems(o) for t, o in mapping.items() if t.startswith("⟦Z") and len(core_stems(o)) >= 3]
     out = []
     for sentence in parts:
+        for token, original in mapping.items():  # "als erste Versenkung ⟦Za⟧" mit ⟦Za⟧ = „erste Versenkung“
+            inner = original[1:-1].strip()
+            if token.startswith("⟦Z") and inner:
+                sentence = re.sub(r"(?<!\w)" + re.escape(inner) + r"\s+" + re.escape(token), token, sentence, flags=re.I)
         end = sentence[-1] if sentence and sentence[-1] in ".!?" else ""
         clauses = re.split(r",\s+", sentence[:-1] if end else sentence)
         kept = clauses[:1] + [c for c in clauses[1:] if TOKEN.search(c) or not any(

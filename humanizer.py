@@ -950,6 +950,38 @@ def added_negations(source: str, result: str) -> list[str]:
     return found
 
 
+def doubled_clauses(sentence: str) -> tuple[str, str] | None:
+    """Zwei Hälften eines Satzes, die dasselbe sagen: "… wurde durch die Loveparade deutlich und die Loveparade zeigte
+    die Folgen …". Liefert (behaltene Hälfte, doppelte Hälfte) oder None."""
+    for match in re.finditer(r",? und ", sentence):
+        first, second = sentence[:match.start()], sentence[match.end():]
+        a, b = core_stems(CITATION.sub(" ", first)), core_stems(CITATION.sub(" ", second))
+        if len(a & b) >= 4 and len(a & b) / min(len(a), len(b)) >= 0.5:
+            return first, second
+    return None
+
+
+def merge_doubled(sentence: str) -> str:
+    """Streicht die doppelte Hälfte eines Satzes; Zahlen und Quellenangaben der gestrichenen Hälfte wandern mit."""
+    found = doubled_clauses(sentence)
+    if not found:
+        return sentence
+    first, second = found
+    if missing_facts(second, first):
+        return sentence
+    citations = [c for c in CITATION.findall(second) if c not in first]
+    first = first.rstrip(" .,;")
+    return first + (" " + " ".join(citations) if citations else "") + "."
+
+
+STRAY_PAREN = re.compile(r"\s*\((?:[a-zäöüß]+(?:\s+[a-zäöüß]+)?)\)")
+
+
+def strip_stray_parens(source: str, text: str) -> str:
+    """Entfernt Klammer-Reste wie "(die)", die das Modell hinterlässt und die im Original nicht stehen."""
+    return STRAY_PAREN.sub(lambda m: m.group(0) if m.group(0).strip() in source else "", text)
+
+
 def dropped_statements(source: str, result: str) -> list[str]:
     """Sätze des Originals, deren eigentliche Aussage in der Ausgabe so gut wie nicht mehr vorkommt."""
     have = core_stems(result.lower())
@@ -1144,7 +1176,8 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
             parts, done = merge_pair(paragraph, parts, parts.index(a), model, url, qualifiers)
             merged += done
     parts, again = restore_facts(paragraph, parts)
-    stripped = [strip_placeholders(strip_stock_words(paragraph, p, qualifiers)) for p in parts]
+    stripped = [strip_stray_parens(paragraph, merge_doubled(strip_placeholders(strip_stock_words(paragraph, p, qualifiers))))
+                for p in parts]
     again += sum(a != b for a, b in zip(stripped, parts))
     return " ".join(stripped), extra + repaired + restored + merged + again, qualifiers
 
@@ -1510,6 +1543,9 @@ def warnings(source: str, result: str, qualifiers: list[str] | None = None, stri
         parts.append(f'Füllsatz: "{sentence}"')
     for citation, _ in misplaced_citations(source, result):
         parts.append(f"Quelle verrutscht: {citation}")
+    for sentence in raw_sentences(result):
+        if doubled_clauses(sentence):
+            parts.append(f'Aussage doppelt im Satz: "{sentence[:60]}"')
     if repeated_sentences(result):
         parts.append(f"{len(repeated_sentences(result))} Satz/Sätze wiederholt")
     added_links = new_connectors(source, result)

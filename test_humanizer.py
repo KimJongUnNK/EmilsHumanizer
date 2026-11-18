@@ -1233,3 +1233,15 @@ def test_erfundene_quellen_teilsaetze_und_verneinungen():
                              "Fördermittel reichen nicht, weder in Städten noch auf dem Land.") == []
     warn = h.warnings(src, out, strict=True)
     assert "Quelle erfunden" in warn and "Teilsatz ohne Grundlage" in warn and "Verneinung dazugekommen" in warn
+
+
+def test_doppelte_haelfte_und_klammerreste():
+    sentence = ("Welche Folgen eine unzureichende Planung haben kann, wurde durch die Ereignisse bei der Loveparade am "
+                "24.07.2010 in Duisburg deutlich und die Ereignisse bei der Loveparade am 24.07.2010 in Duisburg zeigten "
+                "die Konsequenzen mangelnder Planung (vgl. Schmidt 2015, S. 78).")
+    merged = h.merge_doubled(sentence)
+    assert merged.endswith("in Duisburg deutlich (vgl. Schmidt 2015, S. 78).") and merged.count("Loveparade") == 1
+    plain = "Die Halle öffnet um 18 Uhr und die Band spielt ab 20 Uhr."
+    assert h.merge_doubled(plain) == plain
+    assert h.strip_stray_parens("Balance finden.", "eine Balance (die) zu finden.") == "eine Balance zu finden."
+    assert h.strip_stray_parens("Licht (LED) spart.", "Licht (LED) spart.") == "Licht (LED) spart."

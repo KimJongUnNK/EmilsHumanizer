@@ -38,6 +38,8 @@ def check(source: str, out: str, style: str) -> dict:
         "Quellen erfunden": (h.invented_citations(source, out), lambda v: not v),
         "Teilsätze ohne Grundlage": ([x[:60] for a, b in pairs for x in h.unsupported_clauses(a, b)], lambda v: len(v) <= 1),
         "Verneinungen erfunden": ([x[:60] for a, b in pairs for x in h.added_negations(a, b)], lambda v: not v),
+        "Wiederholungen": (h.repeated_sentences(out) + [s for s in h.raw_sentences(out) if h.doubled_clauses(s)],
+                           lambda v: not v),
         "Aussagen fehlen": ([x[:60] for a, b in pairs for x in h.dropped_statements(a, b)], lambda v: not v),
         # In 98 % der Menschentexte höchstens einer.
         "Füllsätze und Satzmuster-Echos": (h.filler_sentences(out) + [b for _, b in h.echo_pairs(out)], lambda v: len(v) <= 1),

@@ -1,5 +1,6 @@
 """Tests für die Desktop-App. Die Fenster-Tests brauchen einen Bildschirm (unter Linux: xvfb-run)."""
 import json
+import os
 import threading
 import time
 import tkinter as tk
@@ -1000,7 +1001,7 @@ def test_satz_probleme():
     issues = h.sentence_issues(source, "Das Personal wird geschult, obwohl das eine entscheidende Rolle spielt.")
     assert issues["verknüpfung"] == ["obwohl"] and "entscheidende rolle" in issues["floskel"]
     assert h.sentence_issues(source, "Das Personal wird geschult.") == {"wörtlich": ["Das Personal wird geschult."]}
-    assert h.sentence_issues(source, "Geschult werden alle Leute im Team.") == {}
+    assert h.sentence_issues(source, "Geschult wird das gesamte Personal.") == {}
 
 
 def test_streichen_ohne_modell():
@@ -1131,10 +1132,16 @@ def test_rhythmus_probiert_weiter_wenn_erster_versuch_scheitert(monkeypatch):
               "Die Musik beginnt kurz darauf sehr leise. Die Technik prüft dabei noch die Anlage.")
     parts = ["Am frühen Abend öffnet die Halle ihre Türen.", "Dann suchen sich die Gäste ihre Plätze.",
              "Kurz darauf beginnt sehr leise die Musik.", "Dabei prüft die Technik noch die Anlage."]
-    good = "Am frühen Abend öffnet die Halle ihre Türen, und dann suchen sich die Gäste ihre Plätze."
-    replies = iter(["Die Musik beginnt, obwohl die Technik prüft.", good, good])
     calls = []
-    monkeypatch.setattr(h, "_chat", lambda m, u, msgs: calls.append(msgs) or next(replies))
+
+    def chat(m, u, msgs):
+        calls.append(msgs)
+        if len(calls) == 1:
+            return "Die Musik beginnt, obwohl die Technik prüft."
+        pair = msgs[-1]["content"].split("Sätze: ", 1)[-1]  # die angefragten zwei Sätze, neutral verbunden
+        first, second = h.raw_sentences(pair)
+        return first.rstrip(".") + ", und " + second[0].lower() + second[1:]
+    monkeypatch.setattr(h, "_chat", chat)
     out, n = h.vary_rhythm(source, list(parts), "m", "u", [])
     assert n == 1 and len(calls) >= 2
     assert len(out) == 3 and not any("obwohl" in p for p in out)
@@ -1142,3 +1149,154 @@ def test_rhythmus_probiert_weiter_wenn_erster_versuch_scheitert(monkeypatch):
     calls.clear()
     monkeypatch.setattr(h, "_chat", lambda m, u, msgs: calls.append(msgs) or "Nein.")
     assert h.vary_rhythm(source, list(parts), "m", "u", []) == (parts, 0) and len(calls) <= 3
+
+
+# --- Emils Lauf vom 18.11.: faktisch sauber, aber Füllsätze, verlorene Abschwächungen und Verneinungen -----------
+
+def _emil():
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "werkzeuge")
+    src = open(os.path.join(base, "testtexte", "1_nachhaltigkeit.txt"), encoding="utf-8").read().split("\n", 1)[1].strip()
+    out = open(os.path.join(base, "pruefaelle", "1_nachhaltigkeit_emil.txt"), encoding="utf-8").read().strip()
+    return src, out
+
+
+def test_emils_lauf_wird_erkannt():
+    src, out = _emil()
+    pairs = list(zip(h.paragraphs(src), h.paragraphs(out)))
+    assert [x for a, b in pairs for x in h.missing_hedges(h.extract_hedges(a), b)] == ["deutlich", "häufig", "muss"]
+    assert [x for a, b in pairs for x in h.missing_negations(a, b)][0].startswith("Letztendlich zeigt sich")
+    assert [x for a, b in pairs for x in h.dropped_statements(a, b)][0].startswith("Wer Großveranstaltungen erfolgreich plant")
+    assert h.filler_sentences(out) == ["Sicherheit ist entscheidend."]
+    assert h.echo_pairs(out) == [("Die Veranstaltungstechnik verbraucht viel Energie.",
+                                  "Licht-, Ton- und Videosysteme verbrauchen viel Strom.")]
+    assert {'"ein weiterer Punkt"', '"von großer Wichtigkeit"', "zwei Hauptsätze nur mit Komma verbunden"} <= set(h.habits(out))
+    warn = h.warnings(src, out, strict=True)
+    for part in ("Abschwächung fehlt", "Verneinung fehlt", "Aussage fehlt", "Füllsatz"):
+        assert part in warn
+
+
+def test_abschwaechungen_und_modalverben():
+    assert h.extract_hedges("In Österreich gilt häufig ein Richtwert. Wer plant, muss auswählen.") == ["häufig", "muss"]
+    assert h.missing_hedges(["häufig"], "Oft gilt ein Richtwert.") == []          # Synonym genügt
+    assert h.missing_hedges(["etwa"], "rund 50.000 Gäste") == []
+    assert h.missing_hedges(["muss"], "Man sollte Partner sorgfältig auswählen.") == ["muss"]  # muss → sollte
+    assert h.missing_hedges(["häufig"], "In Österreich liegt der Richtwert bei 100 dB(A).") == ["häufig"]
+    # Eine Reparatur, die "häufig" verliert, zählt nicht.
+    old = "In Österreich gilt häufig ein Richtwert von 100 dB(A) am Mischpult."
+    assert not h.keeps_content(old, old, "In Österreich liegt der Richtwert am Mischpult bei 100 dB(A).", [])
+    assert h.keeps_content(old, old, "In Österreich liegt der Richtwert am Mischpult oft bei 100 dB(A).", [])
+
+
+def test_verneinungen():
+    src = "Gute Planung ersetzt keine Flexibilität. Professionelle Technik ist nicht mehr wegzudenken."
+    assert h.missing_negations(src, "Gute Planung ersetzt Flexibilität. Professionelle Technik gehört dazu.") == \
+        ["Gute Planung ersetzt keine Flexibilität."]  # die Redewendung darf positiv umschrieben werden
+    assert h.missing_negations(src, "Flexibilität ersetzt gute Planung nicht. Technik gehört dazu.") == []
+    assert not h.keeps_content(src, "Gute Planung ersetzt keine Flexibilität.", "Gute Planung ersetzt Flexibilität.", [])
+
+
+def test_fuellsaetze_und_echos():
+    text = ("Die Sicherheit der Gäste hat Vorrang. Sicherheit ist entscheidend. Ein Konzept plant Fluchtwege.\n\n"
+            "Kurz gesagt: Das Konzept steht seit Mai. Die Halle fasst 2.000 Gäste.")
+    assert h.filler_sentences(text) == ["Sicherheit ist entscheidend."]
+    assert h.echo_pairs("Die Technik verbraucht viel Energie. Die Systeme verbrauchen viel Strom.") != []
+    assert h.echo_pairs("Die Technik verbraucht viel Energie. Die Halle fasst 2.000 Gäste.") == []
+    parts = ["Die Sicherheit der Gäste hat Vorrang.", "Sicherheit ist entscheidend.", "Ein Konzept plant Fluchtwege."]
+    assert h.drop_unfounded(" ".join(parts), parts, strict=True) == [parts[0], parts[2]]
+
+
+def test_kommasatz():
+    assert h.COMMA_SPLICE.search("LED senkt den Verbrauch um etwa 60 %, technische Innovationen können Emissionen senken.")
+    assert not h.COMMA_SPLICE.search("Diese weite, blühende Natur ist der rechte Tempel.")
+    assert not h.COMMA_SPLICE.search("Die Gäste, die Tickets haben, dürfen hinein.")
+
+
+def test_fehlende_aussage_abschwaechung_und_verneinung_kommen_zurueck():
+    src = ("In Österreich gilt häufig ein Richtwert von 100 dB(A). Wer Festivals plant, muss sich intensiv mit "
+           "Lärmschutz auseinandersetzen. Gute Planung ersetzt keine Flexibilität.")
+    parts = ["In Österreich liegt der Richtwert bei 100 dB(A).", "Gute Planung ersetzt Flexibilität."]
+    out, n = h.restore_facts(src, list(parts), complete=True)
+    text = " ".join(out)
+    assert n >= 3 and "häufig" in text and "auseinandersetzen" in text and "keine Flexibilität" in text
+    assert not h.missing_facts(src, text)
+
+
+def test_erfundene_quellen_teilsaetze_und_verneinungen():
+    src = "Die Anforderungen haben sich in den letzten Jahren deutlich verschärft (vgl. Berger 2021, S. 45)."
+    out = ("Die Anforderungen haben sich zuletzt merklich verschärft (vgl. Berger 2021, S. 45), und es gibt keine "
+           "Belege für einen Zusammenhang (vgl. [Smith, 2020]).")
+    assert h.invented_citations(src, out) == ["(vgl. [Smith, 2020])"]
+    assert h.strip_placeholders(out).endswith("Zusammenhang.")
+    assert h.unsupported_clauses(src, out) == ["und es gibt keine Belege für einen Zusammenhang"]
+    assert h.added_negations(src, out) == [out]
+    issues = h.sentence_issues(src, out)
+    assert "unbelegt" in issues and h.issue_score(issues) >= 6
+    assert "lass sie weg" in h.repair_request(out, issues)
+    # Eine Reparatur darf keine Quelle und keine Verneinung erfinden.
+    assert not h.keeps_content(src, src, "Die Anforderungen sind nicht mehr dieselben (vgl. Berger 2021, S. 45).", [])
+    # "weder … noch" für "nicht mehr" ist keine neue Verneinung.
+    assert h.added_negations("Fördermittel reichen in Städten nicht mehr aus.",
+                             "Fördermittel reichen nicht, weder in Städten noch auf dem Land.") == []
+    warn = h.warnings(src, out, strict=True)
+    assert "Quelle erfunden" in warn and "Teilsatz ohne Grundlage" in warn and "Verneinung dazugekommen" in warn
+
+
+def test_doppelte_haelfte_und_klammerreste():
+    sentence = ("Welche Folgen eine unzureichende Planung haben kann, wurde durch die Ereignisse bei der Loveparade am "
+                "24.07.2010 in Duisburg deutlich und die Ereignisse bei der Loveparade am 24.07.2010 in Duisburg zeigten "
+                "die Konsequenzen mangelnder Planung (vgl. Schmidt 2015, S. 78).")
+    merged = h.merge_doubled(sentence)
+    assert merged.endswith("in Duisburg deutlich (vgl. Schmidt 2015, S. 78).") and merged.count("Loveparade") == 1
+    plain = "Die Halle öffnet um 18 Uhr und die Band spielt ab 20 Uhr."
+    assert h.merge_doubled(plain) == plain
+    assert h.strip_stray_parens("Balance finden.", "eine Balance (die) zu finden.") == "eine Balance zu finden."
+    assert h.strip_stray_parens("Licht (LED) spart.", "Licht (LED) spart.") == "Licht (LED) spart."
+
+
+def test_reparatur_behaelt_die_aussage():
+    source = ("Veranstalter stehen nicht nur vor ökonomischen, sondern auch vor ökologischen und sozialen "
+              "Herausforderungen. Besucher erwarten zunehmend verantwortungsvolle Events. Ein Festival hat 50.000 Gäste.")
+    old = h.raw_sentences(source)[0]
+    # Ein anderer Satz desselben Absatzes ist keine Reparatur.
+    assert not h.keeps_content(source, old, "Besucher erwarten zunehmend verantwortungsvolle Events.", [])
+    # Zahlen aus anderen Sätzen dürfen nicht hereinwandern.
+    assert not h.keeps_content(source, "Besucher erwarten zunehmend verantwortungsvolle Events.",
+                               "Bei 50.000 Gästen erwarten Besucher zunehmend verantwortungsvolle Events.", [])
+    assert h.keeps_content(source, old, "Ökonomische, ökologische und soziale Herausforderungen kommen auf "
+                                        "Veranstalter zu.", [])
+
+
+def test_reparaturauftrag_und_wiederholungen():
+    s = "Die Technik eröffnete neue Möglichkeiten (vgl. Huber 2015, S. 67)."
+    request = h.repair_request(s, {"wörtlich": [s]})
+    assert "Diese Angaben bleiben wörtlich: (vgl. Huber 2015, S. 67)\n" in request and "; 2015" not in request
+    assert h.strip_placeholders("Das prägte das Festivalformat (mit [Name]).") == "Das prägte das Festivalformat."
+    first = "Heute nutzen über 90 % der Bühnen in Deutschland und Österreich DMX-basierte Systeme (vgl. VLB 2022, S. 14)."
+    echo = "Diese Systeme werden heutzutage in Deutschland und Österreich verwendet."
+    assert h.drop_unfounded(first, [first, echo], strict=True) == [first]
+
+
+def test_pflichtliste_als_anhaengsel():
+    assert h.strip_list_echo("Technik und Gesellschaft hingen zusammen (vgl. Müller 2018, S. 23); 20.") == \
+        "Technik und Gesellschaft hingen zusammen (vgl. Müller 2018, S. 23)."
+    assert h.strip_list_echo("Die Technik eröffnete Möglichkeiten (vgl. Huber 2015, S. 67); 2015; 67.") == \
+        "Die Technik eröffnete Möglichkeiten (vgl. Huber 2015, S. 67)."
+    real = "Die Halle war voll; die Gäste tanzten bis zum Morgen."
+    assert h.strip_list_echo(real) == real
+    assert h.clean_reply("Satz: Licht kam 1881 auf; 1881.") == "Licht kam 1881 auf."
+
+
+def test_klammer_echo_wiederholung_und_umgestellte_verneinung():
+    src = "Letztendlich zeigt sich: Technischer Fortschritt und künstlerische Gestaltung sind keine Gegensätze, sondern bedingen einander."
+    out = ("Technischer Fortschritt und künstlerische Gestaltung bedingen sich gegenseitig. Diese Wechselwirkung "
+           "beweist, dass sie keine Gegensätze sind (so dass sich zeigt, dass sie keine Gegensätze sind). "
+           "Technik und künstlerische Gestaltung beeinflussen sich gegenseitig.")
+    assert h.missing_negations(src, out) == []
+    cleaned = h.strip_stray_parens(src, h.raw_sentences(out)[1])
+    assert cleaned == "Diese Wechselwirkung beweist, dass sie keine Gegensätze sind."
+    assert "so dass" in [w for w, _, _ in h.new_connectors(src, out)]
+    parts = h.raw_sentences(out)
+    assert h.drop_repeats(parts) == parts[:2]
+    # Klammern aus dem Original bleiben.
+    keep = "Die Halle (ein ehemaliger Lokschuppen am Stadtrand) fasst viele Gäste."
+    assert h.strip_stray_parens(keep, keep) == keep

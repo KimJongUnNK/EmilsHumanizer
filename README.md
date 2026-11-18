@@ -113,17 +113,30 @@ In `werkzeuge/testtexte/` liegen fünf KI-typische Texte zu Event-Engineering-Th
 | Kriterium | Grenze |
 |---|---|
 | Zahlen und Daten fehlen oder erfunden | keine |
-| Quellenangaben fehlen oder verrutscht | keine |
+| Quellenangaben fehlen, verrutscht oder erfunden (auch Platzhalter wie "(vgl. [Quelle])") | keine |
 | Einschränkungen (Orte, Zeiträume, Gruppen) fehlen | höchstens 1 |
-| neu behauptete Zusammenhänge ("obwohl", "sodass", "weil" …) | höchstens 1 |
+| Abschwächungen und Modalverben fehlen ("häufig", "etwa", "muss" → "sollte") | höchstens 1 |
+| Verneinungen fehlen ("sind keine Gegensätze") | keine |
+| Verneinungen erfunden | keine |
+| Aussagen des Originals fehlen ganz | keine |
+| neu behauptete Zusammenhänge ("obwohl", "sodass", "dadurch", "weil" …) | höchstens 1 |
 | Sätze ohne Grundlage im Original | höchstens 1 |
+| Teilsätze ohne Grundlage ("…, und es gibt keine Belege dafür") | höchstens 1 |
+| Wiederholungen (ganzer Satz oder doppelte Satzhälfte) | keine |
+| Füllsätze und Satzmuster-Echos ("Sicherheit ist entscheidend.") | höchstens 1 |
 | Satzfragmente (akademisch) | keine |
-| Floskeln | höchstens 2, wie bei echten Menschentexten |
+| Floskeln, KI-Überleitungen, Kommasätze | höchstens 2, wie bei echten Menschentexten |
 | Streuung der Satzlängen | ab 0,45 |
 | fast wörtlich übernommene Sätze | höchstens 20 % |
-| Länge im Vergleich zum Original | 80 bis 120 % |
+| Länge im Vergleich zum Original | 70 bis 120 % |
 
-**Gemessen mit `gemma3:12b`: 8 von 10 Läufen bestanden** (fünf Texte, je zwei Läufe). Kein Lauf hat eine Zahl, Quelle oder Einschränkung verloren oder etwas erfunden. Beide Fehlschläge betreffen den Sponsoring-Text: Er wurde auf 72 bzw. 78 % gekürzt, weil der Testtext voller Floskeln steckt ("In der heutigen Zeit", "Abschließend lässt sich sagen"), die beim Umschreiben wegfallen.
+Die Prüfungen auf Füllsätze, Echos, Kommasätze und doppelte Satzhälften sind an rund 5.500 echten Menschentexten aus `beispieltexte/` geeicht: Dort schlagen sie in höchstens 1 bis 2 % der Texte an.
+
+**Gemessen mit `gemma3:12b`: 7 von 10 Läufen bestanden** (fünf Texte, je zwei Läufe). In keinem Lauf fehlt eine Zahl, Quelle, Einschränkung, Abschwächung, Verneinung oder Aussage, und nichts ist erfunden. Die drei Fehlschläge sind Stil: zweimal zu gleichmäßige Satzlängen (Streuung 0,42 und 0,36), zweimal ein Satz, der eine Aussage aus einem anderen Absatz wiederholt.
+
+Zum Vergleich: Die Vorversion kam mit den alten Kriterien auf 8 von 10. Mit den neuen fällt sie fast komplett durch, vor allem wegen verlorener Verneinungen am Textende, und in einem Lauf stand eine erfundene Quelle "(vgl. [Smith, 2020])".
+
+Ein echter Lauf eines Nutzers liegt als fester Prüffall in `werkzeuge/pruefaelle/`.
 
 Selbst laufen lassen, zum Beispiel mit dem 24b-Modell (dauert je nach Rechner eine bis mehrere Stunden):
 
@@ -131,7 +144,7 @@ Selbst laufen lassen, zum Beispiel mit dem 24b-Modell (dauert je nach Rechner ei
 python werkzeuge/testreihe.py --model mistral-small3.2:24b
 ```
 
-Was die Testreihe nicht sieht: abgeschwächte Aussagen ("muss" wird zu "sollte"), weggelassene Halbsätze ohne Zahl und verdrehte Zusammenhänge ohne Signalwort. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
+Was die Testreihe nicht sieht: inhaltlich verdrehte Aussagen ohne Signalwort (aus "1888 folgte das Burgtheater" wird "1888 entstand das Burgtheater") und Umschreibungen, die mit anderen Wörtern etwas dazudichten. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
 
 ## Tests
 

@@ -474,6 +474,23 @@ def crutches(result: str) -> list[str]:
 CITATION = re.compile(r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)", re.I)
 
 
+PLACEHOLDER = re.compile(r"\s*(?:\([^()]*\[[^\]]*\][^()]*\)|\[\s*(?:Quelle|Autor|Name|Jahr|Seite|Zitat|Beleg|Ref|Titel|Ort)[^\]]*\]"
+                         r"|\(\s*(?:vgl\.|siehe)\s*(?:Quelle|Autor|o\.\s*A\.)?\s*\))", re.I)
+
+
+def invented_citations(source: str, result: str) -> list[str]:
+    """Quellenangaben und Platzhalter wie "(vgl. [Quelle])" in der Ausgabe, die im Original nicht stehen."""
+    have = set(CITATION.findall(source))
+    found = [c for c in CITATION.findall(result) if c not in have] + \
+            [m.group(0).strip() for m in PLACEHOLDER.finditer(result) if m.group(0).strip() not in source]
+    return list(dict.fromkeys(found))
+
+
+def strip_placeholders(text: str) -> str:
+    """Entfernt Platzhalter-Quellen, die das Modell erfunden hat. Echte Quellenangaben bleiben."""
+    return re.sub(r"\s+([.,;:])", r"\1", PLACEHOLDER.sub("", text))
+
+
 def citation_parts(citation: str) -> tuple[list[str], list[str]]:
     """Autorennamen und Zahlen (Jahr, Seite) einer Quellenangabe wie "(vgl. Hofer/Lindner 2019, S. 112)"."""
     inner = re.sub(r"^\((?:vgl\.|siehe|s\.|nach|zit\. n\.)\s*", "", citation, flags=re.I).rstrip(")")
@@ -603,6 +620,32 @@ def plan_fit(plan: list[int], result: str) -> float:
     return min([error(plan)] + [error(t) for t in shorter])
 
 
+class _CommaSplice:
+    """Zwei Hauptsätze nur mit Komma: "… um 60 %, technische Innovationen können …". Zählt nur, wenn vor dem Komma
+    ein vollständiger Satzteil mit Verb steht, nicht bei Aufzählungen ("weite, blühende Natur ist") oder Appositionen."""
+    AFTER = re.compile(
+        r", (?!(?:der|die|das|dem|den|des|denen|deren|dessen|welche\w*|wo|was|wie|wenn|weil|dass|ob|sondern|aber|und|"
+        r"oder|doch|jedoch|also|bzw|z|d|u|etwa|rund|bis|vor|nach|bei|mit|von|in|im|am|an|auf|aus|zu|zur|zum|so|sowie)\b)"
+        r"(?:[a-zäöüß]+ ){0,2}[A-ZÄÖÜ][\wäöüß-]+ (?:können|kann|müssen|muss|sollen|soll|sind|ist|haben|hat|werden|wird)\b")
+    VERB = re.compile(r"\b(?:ist|sind|war|waren|hat|haben|wird|werden|kann|können|muss|müssen|soll|sollen|senk\w*|steig\w*|"
+                      r"zeig\w*|bild\w*|lieg\w*|gilt|gelten|bleib\w*|verbind\w*|führ\w*|mach\w*|bring\w*|geh\w*|komm\w*|"
+                      r"[a-zäöüß]{3,}(?:t|en))\b")
+    SKIP = {"den", "dem", "des", "der", "die", "das", "einen", "einem", "einen", "einer", "unten", "oben", "eben", "seit",
+            "nicht", "selten", "zuletzt", "jetzt", "meist", "sehr", "mehr", "erst", "fast", "bereits", "geschmackt"}
+
+    def search(self, text: str):
+        for match in self.AFTER.finditer(text):
+            before = re.split(r"[.!?;:,–]", text[:match.start()])[-1]
+            words = before.split()
+            if len(words) >= 3 and words[-1][-1] not in "eEn" and any(
+                    self.VERB.fullmatch(w) and w not in self.SKIP for w in words[1:]):
+                return match
+        return None
+
+
+COMMA_SPLICE = _CommaSplice()
+
+
 HABITS = [
     (re.compile(r"\bstell(?:t|en|te)\b[^.!?]{0,80}\bdar\b"), '"… stellt … dar"'),
     (re.compile(r"\b(?:ist|sind) von (?:\w+ ){0,2}Bedeutung\b"), '"ist von … Bedeutung"'),
@@ -610,6 +653,10 @@ HABITS = [
     (re.compile(r"\bsomit\b"), '"somit"'),
     (re.compile(r"\bzentrale[nrs]? (?:Aspekt|Punkt|Faktor)"), '"zentraler Aspekt/Punkt"'),
     (re.compile(r"\bwesentliche[nrs]? (?:Aspekt|Punkt|Faktor|Anforderung)"), '"wesentlicher Aspekt"'),
+    (re.compile(r"\b[Ee]in(?:en)? weitere[nrs]? (?:\w+ )?(?:Punkt|Aspekt|Faktor|Bereich|Baustein)\b"), '"ein weiterer Punkt"'),
+    (re.compile(r"\b[Vv]on (?:großer|zentraler|besonderer|enormer|hoher|entscheidender) (?:Wichtigkeit|Bedeutung|Relevanz)\b"),
+     '"von großer Wichtigkeit"'),
+    (COMMA_SPLICE, 'zwei Hauptsätze nur mit Komma verbunden'),
 ]
 
 
@@ -637,6 +684,11 @@ def paragraph_request(paragraph: str, plan: list[int], avoid: list[str] | None =
             + ("Diese Einschränkungen müssen erhalten bleiben: " + "; ".join(qualifiers) + "\n" if qualifiers else "")
             + claims
             + ("Diese Wendungen sind verboten: " + ", ".join(avoid) + "\n" if avoid else "")
+            + ("Diese Abschwächungen und Modalverben behalten ihre Bedeutung (Synonym erlaubt, \"muss\" bleibt \"muss\"): "
+               + ", ".join(extract_hedges(paragraph)) + "\n" if extract_hedges(paragraph) else "")
+            + "Jeder kurze Satz trägt eine eigene Aussage der Vorlage. Wiederhole nie den Satz davor mit anderen Worten, "
+              "und schreib keine Sätze, die nur werten (\"Sicherheit ist entscheidend.\"). Zwei Hauptsätze trennst du mit "
+              "Punkt oder verbindest sie mit \"und\", nie nur mit Komma.\n"
             + "Füge nichts hinzu, was nicht im Absatz steht.\n\n"
             f"Absatz:\n{paragraph}")
 
@@ -723,12 +775,15 @@ def sentence_issues(source: str, sentence: str) -> dict[str, list[str]]:
         "wörtlich": unchanged_sentences(source, sentence)[:1],
         "verknüpfung": [connector_name(w) for words in CONNECTORS.values() for w in words
                         if re.search(r"\b%s\b" % w, sentence, re.I) and not re.search(r"\b%s\b" % w, source, re.I)],
+        "unbelegt": unsupported_clauses(source, sentence) + [s for s in added_negations(source, sentence)][:1]
+        + invented_citations(source, sentence),
     }
     return {k: v for k, v in issues.items() if v}
 
 
 def issue_score(issues: dict[str, list[str]]) -> int:
-    return len(issues.get("floskel", [])) + 2 * len(issues.get("wörtlich", [])) + 2 * len(issues.get("verknüpfung", []))
+    return (len(issues.get("floskel", [])) + 2 * len(issues.get("wörtlich", [])) + 2 * len(issues.get("verknüpfung", []))
+            + 3 * len(issues.get("unbelegt", [])))
 
 
 REPAIR_SYSTEM = ("Du formulierst einzelne deutsche Sätze um. Du gibst nur den neuen Satz aus, ohne Kommentar und ohne "
@@ -747,7 +802,12 @@ def repair_request(sentence: str, issues: dict[str, list[str]]) -> str:
         lines.append("Die Wörter " + ", ".join(f'"{w}"' for w in issues["verknüpfung"]) + " behaupten einen "
                      "Zusammenhang, der nicht belegt ist. Verbinde die Aussagen neutral (mit \"und\", Relativsatz oder "
                      "Doppelpunkt) oder mach zwei Sätze daraus.")
-    keep = list(dict.fromkeys(CITATION.findall(sentence) + [surface for _, _, surface in facts(sentence)]))
+    if "unbelegt" in issues:
+        lines.append("Diese Teile stehen nicht in der Vorlage, lass sie weg: " + " / ".join(f'"{u}"' for u in issues["unbelegt"])
+                     + ". Erfinde keine Quelle, keine Verneinung und keine Begründung.")
+    # Zahlen aus Quellenangaben nicht einzeln aufzählen, sonst hängt das Modell sie als "; 2015; 67" an den Satz.
+    keep = list(dict.fromkeys(CITATION.findall(sentence)
+                              + [surface for _, _, surface in facts(CITATION.sub(" ", sentence))]))
     if keep:
         lines.append("Diese Angaben bleiben wörtlich: " + "; ".join(keep))
     return "Formuliere diesen Satz neu.\n" + "\n".join(lines) + "\n\nSatz: " + sentence
@@ -762,13 +822,32 @@ def keeps_content(source: str, old: str, new: str, qualifiers: list[str], loose:
             and low * len(old.split()) <= len(new.split()) <= high
             and not missing_facts(old, new) and all(c in new for c in CITATION.findall(old))
             and not added_facts(source, new) and not unsupported_sentences(source, new)
-            and not missing_qualifiers(carried, new))
+            and not missing_qualifiers(carried, new) and not missing_hedges(extract_hedges(old), new)
+            and _negations(new) >= _negations(old) - (1 if added_negations(source, old) else 0)
+            and not added_negations(source, new) and not invented_citations(source, new)
+            and keeps_statement(old, new) and not added_facts(old, new))
 
 
 def clean_reply(reply: str) -> str:
     reply = flatten(reply)
     reply = re.sub(r"^(?:Satz|Neuer Satz|Umformulierung)\s*:\s*", "", reply, flags=re.I)
+    reply = strip_list_echo(reply)
     return reply.strip("\"„“”»«").strip()
+
+
+LIST_ECHO = re.compile(r"(?:\s*;\s*[^;.()]{1,25}?\.?)+\s*$")
+
+
+def strip_list_echo(text: str) -> str:
+    """Entfernt Anhängsel wie "(vgl. Müller 2018, S. 23); 20." oder "…; 2015; 67.": Das Modell hängt die Liste der
+    Pflichtangaben an den Satz. Ein echter Satzteil nach Semikolon hat ein Verb und bleibt."""
+    match = LIST_ECHO.search(text)
+    if not match:
+        return text
+    pieces = [p.strip(" .") for p in match.group(0).split(";") if p.strip(" .")]
+    if all(len(p.split()) <= 3 and (re.search(r"\d", p) or len(p.split()) == 1) for p in pieces):
+        return text[:match.start()].rstrip(" ,;") + ("." if not text[:match.start()].rstrip().endswith(".") else "")
+    return text
 
 
 STOCK_WORDS = [
@@ -812,7 +891,7 @@ def repair_sentences(source: str, parts: list[str], model: str, url: str, qualif
             if stripped != sentence:
                 parts[i], sentence, issues = stripped, stripped, sentence_issues(source, stripped)
                 done += 1
-        rounds = tries + (1 if "floskel" in issues else 0)
+        rounds = tries + (1 if "floskel" in issues or "wörtlich" in issues else 0)
         for attempt in range(rounds):
             if not issues:
                 break
@@ -842,8 +921,125 @@ def drop_unfounded(source: str, parts: list[str], strict: bool) -> list[str]:
             continue
         if strict and fragments(sentence) and not carries:
             continue
+        if sentence in filler_sentences(" ".join(parts)) and not missing_hedges(extract_hedges(sentence), rest):
+            continue
+        if kept and not carries and sentence in repeated_sentences(" ".join(kept + [sentence])) \
+                and not missing_hedges(extract_hedges(sentence), rest):
+            continue  # wiederholt nur, was schon dasteht
         kept.append(sentence)
     return kept or parts[:1]
+
+
+STOCK_STEMS = ("zusamm", "festha", "lässt", "beacht", "weiter", "heutig", "aspekt", "punkt", "abschl", "letztl", "letzte",
+               "zeigt", "festst", "gilt", "sagen", "rolle", "spielt")
+
+
+def statement_stems(sentence: str) -> set[str]:
+    """Kernwörter einer Aussage ohne Floskeln und Wertungen: Was übrig bleibt, muss in der Ausgabe wieder auftauchen."""
+    low = sentence.lower()
+    for tell in AI_TELLS:
+        low = low.replace(tell, " ")
+    return {w for w in core_stems(low) if not w.startswith(VERDICT_STEMS + STOCK_STEMS)}
+
+
+CLAUSE_SPLIT = re.compile(r",\s+|:\s+|;\s+|\s+(?=und (?:es|sie|er|das|dies|man|zudem|damit|so)\b)")
+
+
+def unsupported_clauses(source: str, result: str) -> list[str]:
+    """Teilsätze ohne Grundlage im Original, auch in sonst passenden Sätzen: "…, und es gibt keine Belege für einen
+    Zusammenhang." Zählt nur Teilsätze mit mindestens vier Wörtern und zwei Kernwörtern, von denen weniger als ein
+    Drittel im Original vorkommt."""
+    have = core_stems(source.lower())
+    found = []
+    for sentence in raw_sentences(result):
+        for clause in CLAUSE_SPLIT.split(CITATION.sub(" ", PLACEHOLDER.sub(" ", sentence))):
+            stems = {w for w in core_stems(clause.lower()) if not w.startswith(STOCK_STEMS)}
+            if len(clause.split()) >= 4 and len(stems) >= 2 and len(stems & have) / len(stems) < 0.34:
+                found.append(re.sub(r"\s+", " ", clause).strip(" .!?"))
+    return found
+
+
+def added_negations(source: str, result: str) -> list[str]:
+    """Sätze der Ausgabe mit einer Verneinung, die ihr Gegenstück im Original nicht hat."""
+    originals = raw_sentences(source)
+    found = []
+    for sentence in raw_sentences(result):
+        if not _negations(sentence) or not originals:
+            continue
+        best = max(originals, key=lambda o: overlap(sentence, o))
+        if not _negations(best):  # mehr Verneinungen als das Original sind oft nur "weder … noch"; erfunden ist nur eine ganz neue
+            found.append(sentence)
+    return found
+
+
+def keeps_statement(old: str, new: str) -> bool:
+    """Sagt die neue Fassung noch dasselbe wie die alte? Mindestens die Hälfte der Aussage-Kernwörter muss bleiben,
+    damit eine Reparatur nicht einen ganz anderen Satz des Absatzes liefert."""
+    stems = statement_stems(old)
+    return len(stems) < 3 or len(stems & core_stems(new.lower())) / len(stems) >= 0.5
+
+
+def doubled_clauses(sentence: str) -> tuple[str, str] | None:
+    """Zwei Hälften eines Satzes, die dasselbe sagen: "… wurde durch die Loveparade deutlich und die Loveparade zeigte
+    die Folgen …". Liefert (behaltene Hälfte, doppelte Hälfte) oder None."""
+    for match in re.finditer(r",? und ", sentence):
+        first, second = sentence[:match.start()], sentence[match.end():]
+        a, b = core_stems(CITATION.sub(" ", first)), core_stems(CITATION.sub(" ", second))
+        same_fact = {f for _, f, _ in facts(first)} & {f for _, f, _ in facts(second)}
+        if (len(a & b) >= 4 and len(a & b) / min(len(a), len(b)) >= 0.5) or (same_fact and len(a & b) >= 2):
+            return first, second
+    return None
+
+
+def merge_doubled(sentence: str) -> str:
+    """Streicht die doppelte Hälfte eines Satzes; Zahlen und Quellenangaben der gestrichenen Hälfte wandern mit."""
+    found = doubled_clauses(sentence)
+    if not found:
+        return sentence
+    first, second = found
+    if missing_facts(second, first):
+        return sentence
+    citations = [c for c in CITATION.findall(second) if c not in first]
+    first = first.rstrip(" .,;")
+    return first + (" " + " ".join(citations) if citations else "") + "."
+
+
+STRAY_PAREN = re.compile(r"\s*\((?:[a-zäöüß]+(?:\s+[a-zäöüß]+)?)\)")
+
+
+ECHO_PAREN = re.compile(r"\s*\(([^()\d]{12,})\)")
+
+
+def strip_stray_parens(source: str, text: str) -> str:
+    """Entfernt Klammer-Reste wie "(die)" und Klammern, die nur wiederholen, was im selben Satz schon steht
+    ("… keine Gegensätze sind (so dass sich zeigt, dass sie keine Gegensätze sind)"). Klammern aus dem Original bleiben."""
+    text = STRAY_PAREN.sub(lambda m: m.group(0) if m.group(0).strip() in source else "", text)
+
+    def echo(m: re.Match) -> str:
+        inner, rest = core_stems(m.group(1)), core_stems(text.replace(m.group(0), " "))
+        return "" if m.group(0).strip() not in source and inner and len(inner & rest) / len(inner) >= 0.6 else m.group(0)
+    return ECHO_PAREN.sub(echo, text)
+
+
+def drop_repeats(parts: list[str]) -> list[str]:
+    """Streicht am Ende Sätze, die nur einen früheren wiederholen und keine eigene Zahl, Quelle, Abschwächung oder
+    Verneinung tragen."""
+    kept = []
+    for sentence in parts:
+        rest = " ".join(kept)
+        unique = missing_facts(sentence, rest) or CITATION.search(sentence) or \
+            missing_hedges(extract_hedges(sentence), rest) or _negations(sentence) > _negations(rest)
+        if kept and not unique and sentence in repeated_sentences(" ".join(kept + [sentence])):
+            continue
+        kept.append(sentence)
+    return kept
+
+
+def dropped_statements(source: str, result: str) -> list[str]:
+    """Sätze des Originals, deren eigentliche Aussage in der Ausgabe so gut wie nicht mehr vorkommt."""
+    have = core_stems(result.lower())
+    return [o for o in raw_sentences(source)
+            if len(statement_stems(o)) >= 3 and len(statement_stems(o) & have) / len(statement_stems(o)) < 0.25]
 
 
 def overlap(a: str, b: str) -> float:
@@ -909,11 +1105,19 @@ def restore_facts(source: str, parts: list[str], complete: bool = False) -> tupl
         if linked is not None:
             put(max(originals, key=lambda o: overlap(o, parts[linked])), linked)
             continue
-        # Eine Aussage der Vorlage, von der in der Ausgabe so gut wie nichts mehr steht.
-        dropped = next((o for o in originals if len(core_stems(o)) >= 3 and overlap(o, text) < 0.25), None)
-        if dropped is None:
+        # Eine Aussage der Vorlage, von der in der Ausgabe so gut wie nichts mehr steht, eine verlorene Verneinung
+        # ("sind keine Gegensätze") oder eine verlorene Abschwächung ("gilt häufig", "muss").
+        lost = [o for o in dropped_statements(source, text) + missing_negations(source, text) if o not in parts]
+        bad = next((i for i, p in enumerate(parts) if p not in originals and (added_negations(source, p)
+                                                                              or invented_citations(source, p))), None)
+        if bad is not None and not lost:
+            put(max(originals, key=lambda o: overlap(o, parts[bad])), bad)
+            continue
+        for hedge in missing_hedges(extract_hedges(source), text):
+            lost += [o for o in originals if hedge in extract_hedges(o) and o not in parts][:1]
+        if not lost:
             break
-        put(dropped, None)
+        put(lost[0], None)
     return parts, changes
 
 
@@ -1020,8 +1224,13 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
         parts, more = repair_sentences(paragraph, parts, model, url, qualifiers)
         repaired += more
     parts, merged = vary_rhythm(paragraph, parts, model, url, qualifiers)
+    for a, b in echo_pairs(" ".join(parts))[:2]:  # zwei Nachbarn im selben Satzmuster werden ein Satz
+        if a in parts and b in parts and parts.index(b) == parts.index(a) + 1:
+            parts, done = merge_pair(paragraph, parts, parts.index(a), model, url, qualifiers)
+            merged += done
     parts, again = restore_facts(paragraph, parts)
-    stripped = [strip_stock_words(paragraph, p, qualifiers) for p in parts]
+    stripped = drop_repeats([strip_list_echo(strip_stray_parens(paragraph, merge_doubled(strip_placeholders(
+        strip_stock_words(paragraph, p, qualifiers))))) for p in parts])
     again += sum(a != b for a, b in zip(stripped, parts))
     return " ".join(stripped), extra + repaired + restored + merged + again, qualifiers
 
@@ -1132,7 +1341,7 @@ def core_stems(text: str) -> set[str]:
 
 CONNECTORS = {
     "Gegensatz": ["obwohl", "obgleich", "obschon", "trotzdem", "dennoch", "jedoch", "allerdings", "wenngleich"],
-    "Folge": ["sodass", "wodurch", "daher", "deshalb", "deswegen", "folglich", "somit", "weshalb", "infolgedessen"],
+    "Folge": ["sodass", "so dass", "wodurch", "dadurch", "daher", "deshalb", "deswegen", "folglich", "somit", "weshalb", "infolgedessen"],
     # "da" nur als Bindewort nach Komma, sonst träfe es jedes "da ist"
     "Grund": ["weil", "denn", "(?<=, )da"],
 }
@@ -1198,7 +1407,7 @@ def repeated_sentences(result: str) -> list[str]:
     seen, repeated = [], []
     for sentence in sentences(result):
         stems = core_stems(sentence)
-        if len(stems) >= 4 and any(len(stems & s) / min(len(stems), len(s)) > 0.6 for s in seen):
+        if len(stems) >= 4 and any(len(stems & s) / min(len(stems), len(s)) >= 0.6 for s in seen):
             repeated.append(sentence)
         if len(stems) >= 4:
             seen.append(stems)
@@ -1241,6 +1450,118 @@ def missing_qualifiers(qualifiers: list[str], result: str) -> list[str]:
     return [q for q in qualifiers if not core_stems(q) <= have]
 
 
+# Abschwächungen, Gradangaben und Modalverben: Wörter einer Gruppe gelten als gleichwertig ("rund" = "etwa").
+HEDGE_GROUPS = [
+    ("häufig", ["häufig", "oft", "meist", "meistens", "vielfach", "in der Regel", "üblicherweise", "in vielen Fällen"]),
+    ("etwa", ["etwa", "rund", "circa", "ca.", "ungefähr", "annähernd", "knapp"]),
+    ("bis zu", ["bis zu", "maximal", "höchstens", "nicht mehr als"]),
+    ("mindestens", ["mindestens", "wenigstens", "nicht weniger als"]),
+    ("zunehmend", ["zunehmend", "immer mehr", "immer stärker", "verstärkt", "wachsend", "steigend"]),
+    ("bereits", ["bereits", "schon"]),
+    ("deutlich", ["deutlich", "erheblich", "spürbar", "merklich", "stark", "klar", "wesentlich"]),
+    ("kaum", ["kaum", "selten", "wenig"]),
+    ("nicht immer", ["nicht immer", "nicht in jedem Fall", "nicht jedes Mal"]),
+    ("teilweise", ["teilweise", "zum Teil", "teils", "mitunter", "manchmal", "gelegentlich"]),
+    ("überwiegend", ["überwiegend", "weitgehend", "größtenteils", "mehrheitlich", "meist"]),
+    ("vermutlich", ["vermutlich", "möglicherweise", "wahrscheinlich", "vielleicht", "eventuell", "dürfte", "dürften"]),
+    ("muss", ["muss", "müssen", "müsste", "müssten", "musste", "mussten", "erforderlich", "notwendig", "nötig",
+              "verpflichtet", "unumgänglich", "zwingend", "ist zu", "sind zu", "gilt es"]),
+    ("kann", ["kann", "können", "könnte", "könnten", "konnte", "lässt sich", "lassen sich", "möglich", "ermöglich"]),
+    ("soll", ["soll", "sollen", "sollte", "sollten", "empfiehlt", "empfehlen", "ratsam"]),
+    ("darf", ["darf", "dürfen", "durfte", "erlaubt", "zulässig", "gestattet"]),
+]
+
+
+def _has_any(words: list[str], text: str) -> bool:
+    return any(re.search(r"(?<![\wäöüß])" + re.escape(w) + r"(?![äöüß]|\w)" if not w.endswith("ermöglich")
+                         else re.escape(w), text, re.I) for w in words)
+
+
+def extract_hedges(paragraph: str) -> list[str]:
+    """Abschwächungen und Modalverben eines Absatzes, nach Gruppen. Aus "gilt häufig" wird "häufig", aus "muss" "muss".
+    Ein "nicht immer" zählt nicht zusätzlich als Verneinung."""
+    found = []
+    for name, words in HEDGE_GROUPS:
+        # Nur die eigentlichen Signalwörter starten eine Gruppe; Umschreibungen ("notwendig") zählen nur als Ersatz.
+        if _has_any(words[:4] if name in ("muss", "kann", "soll", "darf") else words[:1], paragraph):
+            found.append(name)
+    return found
+
+
+def missing_hedges(hedges: list[str], result: str) -> list[str]:
+    """Abschwächungen, für die in der Ausgabe kein Wort derselben Gruppe mehr steht. "muss" → "sollte" fehlt also."""
+    groups = dict(HEDGE_GROUPS)
+    return [h for h in hedges if not _has_any(groups[h], result)]
+
+
+NEGATION = re.compile(r"\b(?:nicht|kein\w*|nie|niemals|weder|nirgends)\b", re.I)
+# Verneinungen, die nur eine Redewendung sind und positiv umschrieben werden dürfen ("nicht mehr wegzudenken" =
+# "gehört dazu"), sowie "nicht nur … sondern auch" und "nicht immer" (das zählt als Abschwächung).
+NEGATION_IDIOMS = re.compile(
+    r"\b(?:nicht|kaum) (?:nur|immer|zuletzt|einmal|mehr wegzudenken|wegzudenken|zu unterschätzen|zu vernachlässigen|"
+    r"umsonst|ohne Grund|selten|unerheblich|unbedeutend|unwesentlich)\b", re.I)
+
+
+def _negations(text: str) -> int:
+    text = NEGATION_IDIOMS.sub(" ", text)
+    return len(NEGATION.findall(text))
+
+
+def missing_negations(source: str, result: str) -> list[str]:
+    """Sätze des Originals mit Verneinung ("sind keine Gegensätze"), deren Gegenstück in der Ausgabe keine mehr hat."""
+    outs = raw_sentences(result)
+    lost = []
+    for original in raw_sentences(source):
+        if not _negations(original):
+            continue
+        near = [s for s in outs if overlap(original, s) >= 0.3]
+        if any(_negations(s) for s in near):
+            continue
+        # Auch umgestellt zählt: "keine Gegensätze" steht noch, nur in einem anders gebauten Satz.
+        phrases = [m.group(0) for m in re.finditer(r"\b(?:nicht|kein\w*|nie|weder)\s+(?:\w+\s+){0,1}\w+", original, re.I)]
+        kept = any(_negations(s) and core_stems(" ".join(p.split()[1:])) and core_stems(" ".join(p.split()[1:])) <= core_stems(s)
+                   for p in phrases for s in outs)
+        if not kept:
+            lost.append(original)
+    return lost
+
+
+VERDICT_STEMS = ("entsch", "wichti", "zentra", "bedeut", "essenz", "releva", "wesent", "notwen", "unerlä", "maßgeb",
+                 "großer", "groß", "beacht", "unverz", "unabdi", "elemen", "grundl", "kritis", "heraus")
+
+
+def filler_sentences(result: str) -> list[str]:
+    """Kurze Sätze ohne eigene Aussage: nur eine Wertung ("Sicherheit ist entscheidend.") oder nichts, was nicht schon
+    im Satz davor oder danach steht. Sätze mit Zahl oder Quelle zählen nie."""
+    found = []
+    for paragraph in paragraphs(result):
+        parts = raw_sentences(paragraph)
+        for i, sentence in enumerate(parts):
+            if not 3 <= len(sentence.split()) <= 12 or not sentence.endswith(".") or facts(sentence) \
+                    or CITATION.search(sentence):
+                continue
+            content = {w for w in core_stems(sentence) if not w.startswith(VERDICT_STEMS)}
+            neighbours = [parts[j] for j in (i - 1, i + 1) if 0 <= j < len(parts)]
+            if not neighbours:
+                continue
+            # Nur Wertung ("Das ist wichtig.") oder nichts, was nicht schon nebenan steht.
+            if not content or any(content <= core_stems(n) for n in neighbours):
+                found.append(sentence)
+    return found
+
+
+def echo_pairs(result: str) -> list[tuple[str, str]]:
+    """Nachbarsätze mit demselben Muster: beide kurz und mit denselben Kernwörtern im Prädikat, etwa "verbraucht viel
+    Energie." / "verbrauchen viel Strom." Klingt wie eine Aufzählung in Satzform."""
+    pairs = []
+    for paragraph in paragraphs(result):
+        parts = raw_sentences(paragraph)
+        for a, b in zip(parts, parts[1:]):
+            if len(a.split()) <= 12 and len(b.split()) <= 12 and len(core_stems(a) & core_stems(b)) >= 2:
+                pairs.append((a, b))
+    return pairs
+
+
 def paragraphs(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
@@ -1263,8 +1584,27 @@ def warnings(source: str, result: str, qualifiers: list[str] | None = None, stri
     lost = missing_qualifiers(qualifiers or [], result)
     if lost:
         parts.append("Einschränkung fehlt: " + "; ".join(lost))
+    weaker = [x for a, b in zip(paragraphs(source), paragraphs(result)) for x in missing_hedges(extract_hedges(a), b)]
+    if weaker:
+        parts.append("Abschwächung fehlt, Aussage jetzt absoluter: " + ", ".join(dict.fromkeys(weaker)))
+    pairs = list(zip(paragraphs(source), paragraphs(result)))
+    for sentence in [x for a, b in pairs for x in missing_negations(a, b)]:
+        parts.append(f'Verneinung fehlt: "{sentence[:60]}"')
+    for sentence in [x for a, b in pairs for x in dropped_statements(a, b)]:
+        parts.append(f'Aussage fehlt: "{sentence[:60]}"')
+    for clause in [x for a, b in pairs for x in unsupported_clauses(a, b)]:
+        parts.append(f'Teilsatz ohne Grundlage, prüfen: "{clause[:60]}"')
+    for sentence in [x for a, b in pairs for x in added_negations(a, b)]:
+        parts.append(f'Verneinung dazugekommen: "{sentence[:60]}"')
+    if invented_citations(source, result):
+        parts.append("Quelle erfunden: " + ", ".join(invented_citations(source, result)))
+    for sentence in filler_sentences(result):
+        parts.append(f'Füllsatz: "{sentence}"')
     for citation, _ in misplaced_citations(source, result):
         parts.append(f"Quelle verrutscht: {citation}")
+    for sentence in raw_sentences(result):
+        if doubled_clauses(sentence):
+            parts.append(f'Aussage doppelt im Satz: "{sentence[:60]}"')
     if repeated_sentences(result):
         parts.append(f"{len(repeated_sentences(result))} Satz/Sätze wiederholt")
     added_links = new_connectors(source, result)
@@ -1281,7 +1621,7 @@ def warnings(source: str, result: str, qualifiers: list[str] | None = None, stri
     if added:
         parts.append("neu, steht nicht im Original: " + ", ".join(added))
     shorter = shrinkage(source, result)
-    if shorter > 20:
+    if shorter > 30:  # bis 30 % kürzer ist in Ordnung, wenn nur Floskeln wegfallen
         parts.append(f"Ausgabe ist {shorter} % kürzer als das Original")
     same = unchanged_sentences(source, result)
     if len(same) > 1:

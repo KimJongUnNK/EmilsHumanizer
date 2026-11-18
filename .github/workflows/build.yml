@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install pytest pyinstaller
+      - run: pip install pytest pyinstaller pypdf==5.1.0
       - run: pytest -q test_humanizer.py
       - name: Version in die App schreiben
         shell: python
@@ -34,7 +34,7 @@ jobs:
           Start-Process -FilePath dist\Humanizer.exe -ArgumentList '--selftest', "$PWD\selftest.json" -Wait
           $r = Get-Content selftest.json | ConvertFrom-Json
           $r | Format-List
-          if ($r.build -ne $env:GITHUB_SHA -or $r.sachlich -lt 20 -or $r.bericht -lt 20 -or $r.locker -lt 20) { exit 1 }
+          if ($r.build -ne $env:GITHUB_SHA -or -not $r.pdf -or $r.sachlich -lt 20 -or $r.bericht -lt 20 -or $r.locker -lt 20) { exit 1 }
       - uses: actions/upload-artifact@v4
         with:
           name: Humanizer

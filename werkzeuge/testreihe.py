@@ -40,6 +40,12 @@ def check(source: str, out: str, style: str) -> dict:
         "Verneinungen erfunden": ([x[:60] for a, b in pairs for x in h.added_negations(a, b)], lambda v: not v),
         "Wiederholungen": (h.repeated_sentences(out) + [s for s in h.raw_sentences(out) if h.doubled_clauses(s)],
                            lambda v: not v),
+        "Zitate verändert": ([q for q in h.QUOTE.findall(source) if q not in out], lambda v: not v),
+        "Quellenangaben verändert": ([c for c in h.CITATION.findall(source) if c not in out], lambda v: not v),
+        "Zuschreibungen fehlen": ([x[:60] for a, b in pairs for x in h.missing_attributions(a, b)], lambda v: not v),
+        "Konjunktiv verloren": ([x[:60] for a, b in pairs for x in h.missing_subjunctive(a, b)], lambda v: len(v) <= 1),
+        "Überschriften verändert": ([p for p in h.paragraphs(source) if h.is_heading(p) and p not in h.paragraphs(out)],
+                                    lambda v: not v),
         "Aussagen fehlen": ([x[:60] for a, b in pairs for x in h.dropped_statements(a, b)], lambda v: not v),
         # In 98 % der Menschentexte höchstens einer.
         "Füllsätze und Satzmuster-Echos": (h.filler_sentences(out) + [b for _, b in h.echo_pairs(out)], lambda v: len(v) <= 1),

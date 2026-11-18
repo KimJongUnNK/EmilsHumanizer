@@ -1,0 +1,11 @@
+Nachhaltigkeit prägt heute die Planung und Durchführung von Großveranstaltungen, und Besucherinnen und Besucher fordern zunehmend verantwortungsvolle Gestaltung von Events (vgl. Berger 2021, S. 45), wobei Veranstalter ökonomische, ökologische und soziale Herausforderungen bewältigen müssen. Die Anforderungen haben sich in den letzten Jahren verschärft.
+
+Die Veranstaltungstechnik verbraucht viel Energie. Licht-, Ton- und Videosysteme verbrauchen viel Strom. Ein mehrtägiges Festival mit etwa 50.000 Gästen kann einen Strombedarf von bis zu 1,2 Gigawattstunden aufweisen (vgl. Hofer/Lindner 2019, S. 112). LED-Scheinwerfer senken den Verbrauch im Bereich der Beleuchtung um etwa 60 %, technische Innovationen können Emissionen reduzieren.
+
+Von großer Wichtigkeit ist die Sicherheit der Teilnehmenden. Sicherheit ist entscheidend. Ein Crowd-Management-Konzept analysiert Besucherströme, plant Fluchtwege und schult Personal. Die Versammlungsstättenverordnung erlaubt bei Stehplätzen maximal 2 Personen pro Quadratmeter. Am 24.07.2010 in Duisburg zeigten die Ereignisse bei der Loveparade, welche gravierenden Folgen eine unzureichende Planung haben kann (vgl. Schmidt 2015, S. 78).
+
+Gesetzliche Grenzwerte müssen beim Schallschutz eingehalten werden. In Österreich liegt der Richtwert für Veranstaltungen im Freien bei 100 dB(A) am Mischpult, gemessen als Mittelwert über 30 Minuten, während gleichzeitig Anrainerinnen und Anrainer vor übermäßiger Lärmbelastung geschützt werden müssen. Die Balance zwischen Publikumserlebnis und Schutzpflichten ist dabei nicht immer einfach zu halten.
+
+Ein weiterer Punkt ist die Rolle der Digitalisierung. Bei der Steuerung von Besucherströmen unterstützen digitale Ticketing-Systeme, Echtzeit-Monitoring und KI-gestützte Prognosemodelle. Die Digitalisierung verbindet Sicherheit, Effizienz und Nachhaltigkeit direkt miteinander: 38 % der europäischen Festivalveranstalter setzen solche Systeme bereits ein (vgl. Event Industry Report 2023, S. 9).
+
+Modernes Eventmanagement vereint technische, rechtliche und ökologische Aspekte in einem vielseitigen Handlungsfeld, das erfolgreiche Planung von Großveranstaltungen erfordert. Nachhaltigkeit und Sicherheit bilden dabei das Fundament zukunftsfähiger Veranstaltungen.

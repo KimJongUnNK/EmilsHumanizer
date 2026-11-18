@@ -1,5 +1,6 @@
 """Tests für die Desktop-App. Die Fenster-Tests brauchen einen Bildschirm (unter Linux: xvfb-run)."""
 import json
+import os
 import threading
 import time
 import tkinter as tk
@@ -1142,3 +1143,73 @@ def test_rhythmus_probiert_weiter_wenn_erster_versuch_scheitert(monkeypatch):
     calls.clear()
     monkeypatch.setattr(h, "_chat", lambda m, u, msgs: calls.append(msgs) or "Nein.")
     assert h.vary_rhythm(source, list(parts), "m", "u", []) == (parts, 0) and len(calls) <= 3
+
+
+# --- Emils Lauf vom 18.11.: faktisch sauber, aber Füllsätze, verlorene Abschwächungen und Verneinungen -----------
+
+def _emil():
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "werkzeuge")
+    src = open(os.path.join(base, "testtexte", "1_nachhaltigkeit.txt"), encoding="utf-8").read().split("\n", 1)[1].strip()
+    out = open(os.path.join(base, "pruefaelle", "1_nachhaltigkeit_emil.txt"), encoding="utf-8").read().strip()
+    return src, out
+
+
+def test_emils_lauf_wird_erkannt():
+    src, out = _emil()
+    pairs = list(zip(h.paragraphs(src), h.paragraphs(out)))
+    assert [x for a, b in pairs for x in h.missing_hedges(h.extract_hedges(a), b)] == ["deutlich", "häufig", "muss"]
+    assert [x for a, b in pairs for x in h.missing_negations(a, b)][0].startswith("Letztendlich zeigt sich")
+    assert [x for a, b in pairs for x in h.dropped_statements(a, b)][0].startswith("Wer Großveranstaltungen erfolgreich plant")
+    assert h.filler_sentences(out) == ["Sicherheit ist entscheidend."]
+    assert h.echo_pairs(out) == [("Die Veranstaltungstechnik verbraucht viel Energie.",
+                                  "Licht-, Ton- und Videosysteme verbrauchen viel Strom.")]
+    assert {'"ein weiterer Punkt"', '"von großer Wichtigkeit"', "zwei Hauptsätze nur mit Komma verbunden"} <= set(h.habits(out))
+    warn = h.warnings(src, out, strict=True)
+    for part in ("Abschwächung fehlt", "Verneinung fehlt", "Aussage fehlt", "Füllsatz"):
+        assert part in warn
+
+
+def test_abschwaechungen_und_modalverben():
+    assert h.extract_hedges("In Österreich gilt häufig ein Richtwert. Wer plant, muss auswählen.") == ["häufig", "muss"]
+    assert h.missing_hedges(["häufig"], "Oft gilt ein Richtwert.") == []          # Synonym genügt
+    assert h.missing_hedges(["etwa"], "rund 50.000 Gäste") == []
+    assert h.missing_hedges(["muss"], "Man sollte Partner sorgfältig auswählen.") == ["muss"]  # muss → sollte
+    assert h.missing_hedges(["häufig"], "In Österreich liegt der Richtwert bei 100 dB(A).") == ["häufig"]
+    # Eine Reparatur, die "häufig" verliert, zählt nicht.
+    old = "In Österreich gilt häufig ein Richtwert von 100 dB(A) am Mischpult."
+    assert not h.keeps_content(old, old, "In Österreich liegt der Richtwert am Mischpult bei 100 dB(A).", [])
+    assert h.keeps_content(old, old, "In Österreich liegt der Richtwert am Mischpult oft bei 100 dB(A).", [])
+
+
+def test_verneinungen():
+    src = "Gute Planung ersetzt keine Flexibilität. Professionelle Technik ist nicht mehr wegzudenken."
+    assert h.missing_negations(src, "Gute Planung ersetzt Flexibilität. Professionelle Technik gehört dazu.") == \
+        ["Gute Planung ersetzt keine Flexibilität."]  # die Redewendung darf positiv umschrieben werden
+    assert h.missing_negations(src, "Flexibilität ersetzt gute Planung nicht. Technik gehört dazu.") == []
+    assert not h.keeps_content(src, "Gute Planung ersetzt keine Flexibilität.", "Gute Planung ersetzt Flexibilität.", [])
+
+
+def test_fuellsaetze_und_echos():
+    text = ("Die Sicherheit der Gäste hat Vorrang. Sicherheit ist entscheidend. Ein Konzept plant Fluchtwege.\n\n"
+            "Kurz gesagt: Das Konzept steht seit Mai. Die Halle fasst 2.000 Gäste.")
+    assert h.filler_sentences(text) == ["Sicherheit ist entscheidend."]
+    assert h.echo_pairs("Die Technik verbraucht viel Energie. Die Systeme verbrauchen viel Strom.") != []
+    assert h.echo_pairs("Die Technik verbraucht viel Energie. Die Halle fasst 2.000 Gäste.") == []
+    parts = ["Die Sicherheit der Gäste hat Vorrang.", "Sicherheit ist entscheidend.", "Ein Konzept plant Fluchtwege."]
+    assert h.drop_unfounded(" ".join(parts), parts, strict=True) == [parts[0], parts[2]]
+
+
+def test_kommasatz():
+    assert h.COMMA_SPLICE.search("LED senkt den Verbrauch um etwa 60 %, technische Innovationen können Emissionen senken.")
+    assert not h.COMMA_SPLICE.search("Diese weite, blühende Natur ist der rechte Tempel.")
+    assert not h.COMMA_SPLICE.search("Die Gäste, die Tickets haben, dürfen hinein.")
+
+
+def test_fehlende_aussage_abschwaechung_und_verneinung_kommen_zurueck():
+    src = ("In Österreich gilt häufig ein Richtwert von 100 dB(A). Wer Festivals plant, muss sich intensiv mit "
+           "Lärmschutz auseinandersetzen. Gute Planung ersetzt keine Flexibilität.")
+    parts = ["In Österreich liegt der Richtwert bei 100 dB(A).", "Gute Planung ersetzt Flexibilität."]
+    out, n = h.restore_facts(src, list(parts), complete=True)
+    text = " ".join(out)
+    assert n >= 3 and "häufig" in text and "auseinandersetzen" in text and "keine Flexibilität" in text
+    assert not h.missing_facts(src, text)

@@ -33,12 +33,18 @@ def check(source: str, out: str, style: str) -> dict:
         "neue Verknüpfungen": (sum(e for a, b in pairs for _, e, _ in h.new_connectors(a, b)), lambda v: v <= 1),
         "Sätze ohne Grundlage": ([s[:60] for a, b in pairs for s in h.unsupported_sentences(a, b)], lambda v: len(v) <= 1),
         "Fragmente": (h.fragments(out) if strict else [], lambda v: not v),
+        "Abschwächungen fehlen": ([x for a, b in pairs for x in h.missing_hedges(h.extract_hedges(a), b)], lambda v: len(v) <= 1),
+        "Verneinungen fehlen": ([x[:60] for a, b in pairs for x in h.missing_negations(a, b)], lambda v: not v),
+        "Aussagen fehlen": ([x[:60] for a, b in pairs for x in h.dropped_statements(a, b)], lambda v: not v),
+        # In 98 % der Menschentexte höchstens einer.
+        "Füllsätze und Satzmuster-Echos": (h.filler_sentences(out) + [b for _, b in h.echo_pairs(out)], lambda v: len(v) <= 1),
         # An 900 mitgelieferten Menschentexten geeicht: 80 % von ihnen haben höchstens 2, und 80 % der sachlichen
         # eine Streuung ab 0,45.
         "Floskeln": (h.tell_count(out) + len(h.habits(out)), lambda v: v <= 2),
         "Streuung": (h.burstiness(out), lambda v: v >= 0.45),
         "kaum verändert": (len(h.unchanged_sentences(source, out)), lambda v: v <= 0.2 * count),
-        "Länge": (round(ratio, 2), lambda v: 0.8 <= v <= 1.2),
+        # Kürzer ist in Ordnung, solange nichts verloren geht; das prüfen die Kriterien oben.
+        "Länge": (round(ratio, 2), lambda v: 0.7 <= v <= 1.2),
     }
     return {name: {"wert": value, "ok": bool(ok(value))} for name, (value, ok) in values.items()}
 

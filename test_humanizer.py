@@ -1464,3 +1464,19 @@ def test_wiederholung_mit_schon_genannter_quelle_faellt_weg():
              "Leonardos Entwurf für Danae datieren Brockett et al. auf 1496 ⟦Qa⟧.",
              "Leonardos Entwurf für Danae datieren Brockett et al. ebenfalls auf 1496 ⟦Qb⟧."]
     assert h.drop_repeats(teile) == [teile[0], teile[2]]  # eigene Quelle ⟦Qb⟧ bleibt, sie steht im Original
+
+
+def test_kaputte_platzhalter_kommen_nie_in_den_text():
+    m = {"⟦Qa⟧": "(vgl. A, 2000)", "⟦Qb⟧": "(vgl. B, 2001)"}
+    src = "Er nennt 1758 auf S. 207 ⟦Qa⟧. Sugino wird zitiert ⟦Qb⟧."
+    out = h.strip_token_debris(src, "Er nennt 1758 auf S. 207 [207. Sugino wird zitiert [⟧Za⟧ ⟦Zc⟧ [⟦Qa⟧] ⟦Qb⟧.", m)
+    assert out == "Er nennt 1758 auf S. 207. Sugino wird zitiert ⟦Qa⟧ ⟦Qb⟧."
+    assert h.strip_token_debris(src, "Semper notierte 1904 [⟧ und [⟧Za⟦] ⟦Qa⟧ ⟦Qb⟧.", m) == "Semper notierte 1904 und ⟦Qa⟧ ⟦Qb⟧."
+
+
+def test_gehaeufte_quellen_werden_erkannt():
+    src = "Koch nennt 1716 ⟦Qa⟧, Tsuboi 1758 ⟦Qb⟧. Beide bestätigen 1896 ⟦Qc⟧ ⟦Qd⟧."
+    assert h.clumped_citations(src, "Koch nennt 1716, Tsuboi 1758 ⟦Qa⟧ ⟦Qb⟧.")
+    assert not h.clumped_citations(src, "1896 bestätigen beide ⟦Qc⟧ ⟦Qd⟧.")
+    parts, _ = h.restore_facts(src, ["Koch nennt 1716, Tsuboi 1758 ⟦Qa⟧ ⟦Qb⟧.", "1896 bestätigen beide ⟦Qc⟧ ⟦Qd⟧."])
+    assert parts[0] == "Koch nennt 1716 ⟦Qa⟧, Tsuboi 1758 ⟦Qb⟧."

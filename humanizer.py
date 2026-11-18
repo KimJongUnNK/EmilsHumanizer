@@ -1192,6 +1192,30 @@ def dedupe_tokens(parts: list[str]) -> list[str]:
     return out
 
 
+def strip_token_debris(source: str, text: str, mapping: dict[str, str]) -> str:
+    """Entfernt kaputte oder fremde Platzhalter, die das Modell erfunden hat ("[⟧Za⟧", "⟦Zc⟧" ohne Zitat), samt
+    eckiger Klammer, wenn die Vorlage keine eckigen Klammern hat. Echte Platzhalter bleiben."""
+    keep: list[str] = []
+
+    def hide(m: re.Match) -> str:
+        if m.group(0) not in mapping:
+            return ""
+        keep.append(m.group(0))
+        return f"\x01{len(keep) - 1}\x02"
+    text = re.sub(r"⟦[QZ][a-z]+⟧", hide, text)
+    text = re.sub(r"[⟦⟧][QZ]?[a-z]*[⟦⟧]?", "", text)  # Reste wie "⟧Za⟦" oder ein einzelnes "⟧"
+    if "[" not in source:
+        text = re.sub(r"\[([^\s\].,;:!?]*)\]?", lambda m: m.group(1) if m.group(1).startswith("\x01") else "", text)
+    text = re.sub(r"\x01(\d+)\x02", lambda m: keep[int(m.group(1))], text)
+    return re.sub(r"\s+([.,;:!?])", r"\1", re.sub(r"  +", " ", text))
+
+
+def clumped_citations(source: str, sentence: str) -> bool:
+    """Stehen mehrere Quellenangaben ohne Text dazwischen gehäuft, die im Original bei verschiedenen Aussagen stehen?"""
+    return any(re.sub(r"\s+", " ", run) not in re.sub(r"\s+", " ", source)
+               for run in re.findall(r"⟦Q[a-z]+⟧(?:\s*⟦Q[a-z]+⟧)+", sentence))
+
+
 def strip_quote_echo(parts: list[str], mapping: dict[str, str]) -> list[str]:
     """Streicht Nebensätze, die ein direktes Zitat noch einmal ohne Anführungszeichen nacherzählen, etwa
     "… ⟦Za⟧ ⟦Qa⟧, was sie zu einer sehr einfachen Möglichkeit … macht." Der Inhalt steht ja schon im Zitat."""
@@ -1255,6 +1279,10 @@ def restore_facts(source: str, parts: list[str], complete: bool = False) -> tupl
             else:
                 del parts[invented]
                 changes += 1
+            continue
+        clumped = next((i for i, p in enumerate(parts) if clumped_citations(source, p)), None)
+        if clumped is not None:
+            put(max(originals, key=lambda o: overlap(o, parts[clumped])), clumped)
             continue
         moved = misplaced_citations(source, text)
         if moved:
@@ -1376,7 +1404,7 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
     finally:
         _ACTIVE.clear()
         _NAMES.clear()
-    text = normalize_tokens(text, mapping)
+    text = strip_token_debris(masked, normalize_tokens(text, mapping), mapping)
     if not text.strip() or any(t not in text for t in mapping):  # Sicherheitsnetz: lieber das Original
         return paragraph, extra, [unprotect(q, mapping) for q in qualifiers]
     return unprotect(text, mapping), extra, [unprotect(q, mapping) for q in qualifiers]

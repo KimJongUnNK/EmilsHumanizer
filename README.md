@@ -25,7 +25,7 @@ Die App garantiert nicht, dass ein Text an KI-Detektoren vorbeikommt. Lokale Mod
 ## Bedienung
 
 1. Modell und Stil oben auswählen. Die Liste zeigt alle in Ollama installierten Modelle.
-2. Text links einfügen.
+2. Text links einfügen oder mit **Text laden …** aus Word, PDF oder .txt holen. Optional mit **Quellen …** Literaturverzeichnis und Quellen laden.
 3. **Umschreiben** klicken oder Strg+Enter drücken.
 4. Ergebnis rechts prüfen und mit **Kopieren** übernehmen.
 
@@ -75,6 +75,24 @@ Die Statuszeile zeigt den Fortschritt ("Absatz 3 von 6") und am Ende, wie oft ei
 
 Nicht erkannt werden verdrehte Zusammenhänge ohne Signalwort ("das Konzept begrenzt die Dichte" statt "die Verordnung schreibt sie vor"), erfundene Teilsätze in sonst passenden Sätzen und Wiederholungen mit ganz anderen Worten. Ein Satz, der fast nur aus Synonymen besteht, kann umgekehrt fälschlich als "ohne Grundlage" gemeldet werden. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
 
+## Zitate und Quellen
+
+Für Uni-Texte gilt: Direkte Zitate und Quellenangaben bleiben Zeichen für Zeichen, wie sie sind.
+
+- **Zitate** in „…“, »…« oder "…" und **Quellenangaben** in Klammern ersetzt die App vor dem Umschreiben durch Platzhalter (⟦Za⟧, ⟦Qa⟧). Das Modell sieht sie gar nicht und kann sie weder umformulieren noch übersetzen; danach setzt die App sie wieder ein. Fehlt ein Platzhalter, kommt der Originalsatz zurück.
+- Erkannt werden Angaben mit und ohne "vgl.", mit Jahr oder "o. J.", auch mehrere in einer Klammer: "(Grösel, 2007, S. 94)", "(vgl. Britannica Editors, o. J.)", "(vgl. Koch, 1993, S. 31; Semper, 1904, S. 323 f.)".
+- **Zuschreibungen** bleiben: Nennt ein Satz den Autor im Fließtext ("Nach Koch …", "Tsuboi verweist …"), muss der Name auch in der Umformulierung stehen, sonst wird aus der Wiedergabe eine eigene Behauptung. Indirekte Rede bleibt im Konjunktiv ("Eine Drehscheibe biete …").
+- **Überschriften** wie "2.1 Vorformen in der Antike" bleiben stehen, auch wenn Absätze nur mit einfachem Zeilenumbruch getrennt sind (wie beim Kopieren aus Word). Die Zeilenstruktur der Ausgabe entspricht dem Original.
+- **Hinweise zum Original:** Eine nicht geschlossene Klammer oder ein doppelter Satz im Original wird gemeldet, aber nicht verändert.
+
+**Text laden …** holt den Text direkt aus einer Word-Datei (.docx), PDF oder .txt.
+
+**Quellen …** lädt dein Literaturverzeichnis und/oder die Quellen selbst (.docx, .pdf, .txt). Nach dem Umschreiben prüft die App:
+- ob jedes direkte Zitat in den Quellen vorkommt (Groß/Klein, Zeilenumbrüche, Silbentrennung und Anführungszeichen egal),
+- ob Autor und Jahr jeder Quellenangabe in den Quellen vorkommen.
+
+Die Quellen dienen nur zum Prüfen. Ihr Inhalt geht nicht ans Modell, und nichts verlässt den Rechner. Ob ein Zitat auf der angegebenen *Seite* steht, prüft die App nicht. Gescannte PDFs ohne Textebene kann sie nicht lesen und sagt das.
+
 ## Update
 
 Der Knopf **Update** oben rechts prüft, ob es eine neuere Version gibt. Wenn ja, lädt die App sie nach einer Rückfrage herunter, ersetzt sich selbst und startet neu. Die App prüft nur auf Klick, nie von allein. Wer aus dem Quelltext startet, lädt die neue Version selbst von dieser Seite.
@@ -98,7 +116,7 @@ Die Werte sind Richtwerte. Reicht der Grafikspeicher nicht, läuft ein Modell ü
 
 ## Aus dem Quelltext starten (Windows, macOS, Linux)
 
-Braucht Python 3.10 oder neuer, keine Zusatzpakete. [ZIP herunterladen](https://github.com/KimJongUnNK/EmilsHumanizer/archive/refs/heads/main.zip), entpacken und im Ordner:
+Braucht Python 3.10 oder neuer. Für PDFs zusätzlich `pip install pypdf` (Word-Dateien gehen ohne). [ZIP herunterladen](https://github.com/KimJongUnNK/EmilsHumanizer/archive/refs/heads/main.zip), entpacken und im Ordner:
 
 ```
 python humanizer.py
@@ -108,7 +126,7 @@ Läuft Ollama auf einem anderen Rechner oder Port, die Adresse über die Umgebun
 
 ## Testreihe: so gut ist der Stand gemessen
 
-In `werkzeuge/testtexte/` liegen fünf KI-typische Texte zu Event-Engineering-Themen (Nachhaltigkeit, Technikgeschichte, Sponsoring, Zeitplanung, Kaffeekultur), vier akademisch, einer locker. Die Quellenangaben darin sind erfunden. `werkzeuge/testreihe.py` schreibt jeden Text um und prüft das Ergebnis gegen feste Kriterien:
+In `werkzeuge/testtexte/` liegen sechs KI-typische Texte zu Event-Engineering-Themen (Nachhaltigkeit, Technikgeschichte, Sponsoring, Zeitplanung, Kaffeekultur, Bühnenversenkung), fünf akademisch, einer locker. Der sechste ist wie ein Uni-Kapitel gebaut: nummerierte Überschriften, einfache Zeilenumbrüche, direkte Zitate auf Deutsch und Englisch, Quellenangaben mit und ohne "vgl.", "o. J.", Autoren im Fließtext und indirekte Rede. Alle Quellenangaben darin sind erfunden. `werkzeuge/testreihe.py` schreibt jeden Text um und prüft das Ergebnis gegen feste Kriterien:
 
 | Kriterium | Grenze |
 |---|---|
@@ -123,6 +141,10 @@ In `werkzeuge/testtexte/` liegen fünf KI-typische Texte zu Event-Engineering-Th
 | Sätze ohne Grundlage im Original | höchstens 1 |
 | Teilsätze ohne Grundlage ("…, und es gibt keine Belege dafür") | höchstens 1 |
 | Wiederholungen (ganzer Satz oder doppelte Satzhälfte) | keine |
+| direkte Zitate oder Quellenangaben verändert | keine |
+| Überschriften verändert | keine |
+| Zuschreibungen fehlen ("Nach Koch …" wird zur eigenen Behauptung) | keine |
+| Konjunktiv der indirekten Rede verloren ("biete" → "bietet") | höchstens 1 |
 | Füllsätze und Satzmuster-Echos ("Sicherheit ist entscheidend.") | höchstens 1 |
 | Satzfragmente (akademisch) | keine |
 | Floskeln, KI-Überleitungen, Kommasätze | höchstens 2, wie bei echten Menschentexten |
@@ -132,9 +154,20 @@ In `werkzeuge/testtexte/` liegen fünf KI-typische Texte zu Event-Engineering-Th
 
 Die Prüfungen auf Füllsätze, Echos, Kommasätze und doppelte Satzhälften sind an rund 5.500 echten Menschentexten aus `beispieltexte/` geeicht: Dort schlagen sie in höchstens 1 bis 2 % der Texte an.
 
-**Gemessen mit `gemma3:12b`: 7 von 10 Läufen bestanden** (fünf Texte, je zwei Läufe). In keinem Lauf fehlt eine Zahl, Quelle, Einschränkung, Abschwächung, Verneinung oder Aussage, und nichts ist erfunden. Die drei Fehlschläge sind Stil: zweimal zu gleichmäßige Satzlängen (Streuung 0,42 und 0,36), zweimal ein Satz, der eine Aussage aus einem anderen Absatz wiederholt.
+**Gemessen mit `gemma3:12b`: 5 von 12 Läufen bestanden** (sechs Texte, je zwei Läufe). Das Ziel von 8 von 10 ist damit verfehlt.
 
-Zum Vergleich: Die Vorversion kam mit den alten Kriterien auf 8 von 10. Mit den neuen fällt sie fast komplett durch, vor allem wegen verlorener Verneinungen am Textende, und in einem Lauf stand eine erfundene Quelle "(vgl. [Smith, 2020])".
+| Text | bestanden | woran es scheiterte |
+|---|---|---|
+| Nachhaltigkeit | 1 von 2 | eine Aussage fehlt |
+| Technikgeschichte | 0 von 2 | Teilsätze ohne Grundlage; Wiederholung, fehlender Schlusssatz, 3 Sätze kaum verändert |
+| Sponsoring | 1 von 2 | 4 Floskeln |
+| Zeitplanung | 2 von 2 | – |
+| Kaffeekultur | 1 von 2 | Streuung 0,43, 3 Sätze kaum verändert |
+| Bühnenversenkung | 0 von 2 | Teilsätze ohne Grundlage; Wiederholung, fehlender Satz, kaum veränderte Sätze |
+
+Was in allen zwölf Läufen hält: Kein direktes Zitat, keine Quellenangabe und keine Überschrift wurde verändert, keine Quelle fehlt oder ist erfunden, keine Zahl fehlt oder ist erfunden. Die Fehlschläge: dreimal fehlt eine Aussage des Originals ganz, dazu hinzugedichtete Halbsätze, Wiederholungen, zu viele Floskeln und Sätze, die das Modell kaum umformuliert hat.
+
+Zum Vergleich: Das vorige Release kam auf den fünf alten Texten auf 7 von 10, dieser Stand dort auf 5 von 10. Bei zwei Läufen pro Text schwankt das stark. Dafür richtet das vorige Release bei echten Uni-Kapiteln Schaden an: Überschriften verschmelzen mit dem Text, Quellenangaben ohne "vgl." sind ungeschützt, Zitate können umformuliert oder übersetzt werden.
 
 Ein echter Lauf eines Nutzers liegt als fester Prüffall in `werkzeuge/pruefaelle/`.
 
@@ -144,7 +177,7 @@ Selbst laufen lassen, zum Beispiel mit dem 24b-Modell (dauert je nach Rechner ei
 python werkzeuge/testreihe.py --model mistral-small3.2:24b
 ```
 
-Was die Testreihe nicht sieht: inhaltlich verdrehte Aussagen ohne Signalwort (aus "1888 folgte das Burgtheater" wird "1888 entstand das Burgtheater") und Umschreibungen, die mit anderen Wörtern etwas dazudichten. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
+Was die Testreihe nicht sieht: inhaltlich verdrehte Aussagen ohne Signalwort (aus "1888 folgte das Burgtheater" wird "1888 entstand das Burgtheater", aus "die meisten Opernhäuser hatten mindestens zwei Versenkungen" wird "mindestens zwei Opernhäuser hatten Versenkungen") und Umschreibungen, die mit anderen Wörtern etwas dazudichten. Je dichter ein Absatz mit Quellen und Jahreszahlen ist, etwa in einer Quellenkritik, desto häufiger passiert das. Bei Uni-Texten die Ausgabe immer gegen das Original lesen.
 
 ## Tests
 

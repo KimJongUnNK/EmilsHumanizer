@@ -14,7 +14,9 @@ import time
 import tkinter as tk
 import urllib.error
 import urllib.request
-from tkinter import messagebox, scrolledtext, ttk
+import zipfile
+from xml.etree import ElementTree
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 REPO = "KimJongUnNK/EmilsHumanizer"
 RELEASE_API = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -105,7 +107,8 @@ CATALOG = [
 MONTHS = "Januar|Jänner|Februar|Feber|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember"
 ABBREVIATIONS = re.compile(
     r"\b(z\.\s?B|d\.\s?h|u\.\s?a|o\.\s?ä|u\.\s?U|bzw|bspw|usw|ca|Nr|vgl|etc|evtl|ggf|inkl|exkl|sog|Dr|Prof|Abb|Mio|Mrd|St|"
-    r"S|Abs|Kap|Aufl|Hrsg|hrsg|Bd|Jg|Jh|Tab|ebd|Ebd|ders|f|ff|al|Std|Min|Mag|Ing|Dipl|Fa|Tel|Str|vs)\."
+    r"S|Abs|Kap|Aufl|Hrsg|hrsg|Bd|Jg|Jh|Tab|ebd|Ebd|ders|f|ff|al|Std|Min|Mag|Ing|Dipl|Fa|Tel|Str|vs|"
+    r"o\.\s?J|o\.\s?A|n\.\s?d|Co|Ltd|Inc|Corp|Jr|Sr|Vol|Ed|Eds|ed|eds|pp|ca)\."
 )
 ORDINAL_NOUNS = "Jahrhundert|Jahrtausend|Auflage|Klasse|Platz|Mal|Stock|Bezirk|Semester|Kapitel|Quartal|Lebensjahr"
 NUMBER_DOT = re.compile(rf"(\d)\.(?=\d|\s+[a-zäöü]|\s+(?:{MONTHS}|{ORDINAL_NOUNS})\w*\b)")
@@ -471,7 +474,138 @@ def crutches(result: str) -> list[str]:
 
 
 
-CITATION = re.compile(r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)", re.I)
+# Quellenangaben in Klammern: mit "vgl." und einer Zahl, oder mit Autorenname und Jahr bzw. "o. J." ("(Grösel, 2007,
+# S. 94)", "(vgl. Britannica Editors, o. J.)", "(vgl. Koch, 1993, S. 31; Semper, 1904, S. 323 f.)"). Dazu die
+# Platzhalter ⟦Qa⟧ und ⟦Za⟧, für die Quellenangaben und Zitate vor dem Modell versteckt werden.
+CITATION = re.compile(
+    r"\((?:vgl\.|siehe|s\.|nach|zit\. n\.)[^()]*\d[^()]*\)"
+    r"|\((?:(?:vgl\.|siehe|s\.|nach|zit\.\s*n\.)\s*)?[A-ZÄÖÜ][^()]*?"
+    r"(?:\b1[4-9]\d\d[a-z]?\b|\b20\d\d[a-z]?\b|\bo\.\s?J\.|\bn\.\s?d\.)[^()]*\)"
+    r"|⟦[QZ][a-z]+⟧", re.I)
+TOKEN = re.compile(r"⟦[QZ][a-z]+⟧")
+# Direkte Zitate: „…“, »…«, "…".
+QUOTE = re.compile(r"„[^„“”\n]{1,800}?[“”]|»[^»«\n]{1,800}?«|\"[^\"\n]{1,800}?\"")
+
+
+def _token(kind: str, i: int) -> str:
+    letters = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        letters = chr(97 + r) + letters
+    return f"⟦{kind}{letters}⟧"
+
+
+def protect(text: str) -> tuple[str, dict[str, str]]:
+    """Ersetzt direkte Zitate und Quellenangaben durch Platzhalter, damit das Modell sie nicht verändern kann.
+    Liefert den Text mit Platzhaltern und die Zuordnung Platzhalter → Original."""
+    mapping: dict[str, str] = {}
+
+    def swap(kind: str):
+        def inner(m: re.Match) -> str:
+            if TOKEN.fullmatch(m.group(0)):
+                return m.group(0)
+            token = _token(kind, sum(1 for k in mapping if k[1] == kind))
+            mapping[token] = m.group(0)
+            return token
+        return inner
+    text = QUOTE.sub(swap("Z"), text)
+    text = CITATION.sub(swap("Q"), text)
+    return text, mapping
+
+
+# Zuordnung Platzhalter → Original des Absatzes, der gerade umgeschrieben wird. Jede Modellantwort läuft durch
+# normalize_tokens(), auch die der Satz-Reparatur.
+_ACTIVE: dict[str, str] = {}
+
+
+def normalize_tokens(text: str, mapping: dict[str, str] | None = None) -> str:
+    """Bringt Platzhalter, die das Modell leicht verändert ("[Qa]", "⟦ Qa ⟧"), in die richtige Form. Hat es statt
+    eines Platzhalters das Zitat selbst wörtlich hingeschrieben, wird daraus wieder der Platzhalter."""
+    text = re.sub(r"[⟦\[]\s*([QZ])\s*([a-z]+)\s*[⟧\]]", r"⟦\1\2⟧", text)
+    for token, original in (_ACTIVE if mapping is None else mapping).items():
+        if token not in text and original in text:
+            text = text.replace(original, token, 1)
+    return text
+
+
+_NAMES: set[str] = set()  # Autorennamen des Absatzes, der gerade umgeschrieben wird
+SUBJUNCTIVE = re.compile(
+    r"\b(?:sei|seien|habe|biete|werde|könne|müsse|solle|dürfe|gebe|liege|stehe|gehe|komme|zeige|erlaube|ermögliche|"
+    r"diene|gelte|bestehe|verfüge|fehle|reiche|handle|lasse|spiele|trage|führe|bilde|bringe|wirke|hänge)\b")
+
+
+def author_names(text: str) -> set[str]:
+    """Nachnamen aus den Quellenangaben eines Texts: "(vgl. Hendrickson und Buckhurst, 2013)" → Hendrickson, Buckhurst."""
+    skip = {"S", "Vgl", "Editors", "Hrsg", "Ebd", "Ders", "Dies", "Aufl", "Bd", "Jg", "Nr"}
+    return {a for c in CITATION.findall(text) if not TOKEN.fullmatch(c) for a in citation_parts(c)[0]
+            if a not in skip and len(a) >= 3}
+
+
+def _names_in(sentence: str, names: set[str]) -> set[str]:
+    plain = CITATION.sub(" ", sentence)
+    return {n for n in names if re.search(r"\b" + re.escape(n) + r"\b", plain)}
+
+
+def missing_attributions(source: str, result: str, names: set[str] | None = None) -> list[str]:
+    """Sätze des Originals, die einen Autor im Fließtext nennen ("Nach Koch…", "Tsuboi verweist…"), deren
+    Gegenstück in der Ausgabe den Namen nicht mehr trägt. Dann wäre aus einer Wiedergabe eine eigene Behauptung
+    geworden."""
+    names = names if names is not None else (author_names(source) | _NAMES)
+    outs = raw_sentences(result)
+    lost = []
+    for original in raw_sentences(source):
+        for name in _names_in(original, names):
+            near = [s for s in outs if overlap(original, s) >= 0.3] or outs
+            if not any(name in _names_in(s, {name}) for s in near):
+                lost.append(original)
+                break
+    return lost
+
+
+def missing_subjunctive(source: str, result: str) -> list[str]:
+    """Sätze des Originals in indirekter Rede ("Eine Drehscheibe biete …"), deren Gegenstück keinen Konjunktiv mehr
+    hat. Aus "biete" wird sonst "bietet", und die Aussage des Autors klingt wie eine eigene."""
+    outs = raw_sentences(result)
+    lost = []
+    for original in raw_sentences(source):
+        if not SUBJUNCTIVE.search(QUOTE.sub(" ", original)):
+            continue
+        near = [s for s in outs if overlap(original, s) >= 0.3]
+        if near and not any(SUBJUNCTIVE.search(QUOTE.sub(" ", s)) for s in near):
+            lost.append(original)
+    return lost
+
+
+def original_hints(text: str) -> list[str]:
+    """Auffälligkeiten im Original, die die App nicht anfasst: offene Klammern und doppelte Sätze."""
+    hints = []
+    for paragraph in paragraphs(text):
+        depth, start = 0, None
+        for i, ch in enumerate(paragraph):
+            if ch == "(":
+                if depth == 0:
+                    start = i
+                elif depth >= 1:
+                    hints.append("Klammer nicht geschlossen: „" + paragraph[start:start + 45].strip() + "…“")
+                    depth = 0
+                    start = i
+                depth += 1
+            elif ch == ")":
+                depth = max(0, depth - 1)
+        if depth > 0 and start is not None:
+            hints.append("Klammer nicht geschlossen: „" + paragraph[start:start + 45].strip() + "…“")
+    for paragraph in paragraphs(text):
+        raw = {_mask(r): r for r in raw_sentences(paragraph)}
+        for sentence in repeated_sentences(paragraph):
+            hints.append("Satz wiederholt einen vorherigen: „" + raw.get(sentence, sentence)[:60] + "…“")
+    return list(dict.fromkeys(hints))
+
+
+def unprotect(text: str, mapping: dict[str, str]) -> str:
+    for token, original in mapping.items():
+        text = text.replace(token, original)
+    return text
 
 
 PLACEHOLDER = re.compile(r"\s*(?:\([^()]*\[[^\]]*\][^()]*\)|\[\s*(?:Quelle|Autor|Name|Jahr|Seite|Zitat|Beleg|Ref|Titel|Ort)[^\]]*\]"
@@ -529,7 +663,7 @@ def paragraph_pool(texts: list[str]) -> list[tuple[int, list[int], str]]:
     """Alle Absätze echter Texte als (Wortzahl, Satzlängen, Absatz), soweit sie als Bauplan taugen."""
     pool = []
     for text in texts:
-        for p in paragraphs(text):
+        for p in raw_paragraphs(text):
             lengths = [len(s.split()) for s in sentences(p)]
             if 2 <= len(lengths) <= 9 and all(1 <= n <= 70 for n in lengths):
                 pool.append((sum(lengths), lengths, p))
@@ -686,6 +820,9 @@ def paragraph_request(paragraph: str, plan: list[int], avoid: list[str] | None =
             + ("Diese Wendungen sind verboten: " + ", ".join(avoid) + "\n" if avoid else "")
             + ("Diese Abschwächungen und Modalverben behalten ihre Bedeutung (Synonym erlaubt, \"muss\" bleibt \"muss\"): "
                + ", ".join(extract_hedges(paragraph)) + "\n" if extract_hedges(paragraph) else "")
+            + ("Wer etwas sagt, bleibt genannt: Autorennamen im Satz (" + ", ".join(sorted(_names_in(paragraph, _NAMES)))
+               + ") bleiben bei ihrer Aussage, indirekte Rede bleibt im Konjunktiv (biete, sei, habe).\n"
+               if _names_in(paragraph, _NAMES) else "")
             + "Jeder kurze Satz trägt eine eigene Aussage der Vorlage. Wiederhole nie den Satz davor mit anderen Worten, "
               "und schreib keine Sätze, die nur werten (\"Sicherheit ist entscheidend.\"). Zwei Hauptsätze trennst du mit "
               "Punkt oder verbindest sie mit \"und\", nie nur mit Komma.\n"
@@ -764,7 +901,7 @@ def paragraph_badness(source: str, result: str, plan: list[int], avoid: list[str
 
 def flatten(paragraph: str) -> str:
     """Zeilenumbrüche, die das Modell mitten in einen Absatz setzt, werden zu Leerzeichen."""
-    return re.sub(r"\s*\n+\s*", " ", paragraph).strip()
+    return normalize_tokens(re.sub(r"\s*\n+\s*", " ", paragraph).strip())
 
 
 def sentence_issues(source: str, sentence: str) -> dict[str, list[str]]:
@@ -788,7 +925,8 @@ def issue_score(issues: dict[str, list[str]]) -> int:
 
 REPAIR_SYSTEM = ("Du formulierst einzelne deutsche Sätze um. Du gibst nur den neuen Satz aus, ohne Kommentar und ohne "
                  "Anführungszeichen. Du fügst keine Information hinzu und lässt keine weg. Zahlen, Namen und "
-                 "Quellenangaben in Klammern bleiben Zeichen für Zeichen gleich.")
+                 "Quellenangaben in Klammern bleiben Zeichen für Zeichen gleich. Platzhalter wie ⟦Qa⟧ (Quellenangabe) "
+                 "oder ⟦Za⟧ (wörtliches Zitat) übernimmst du unverändert und genau einmal.")
 
 
 def repair_request(sentence: str, issues: dict[str, list[str]]) -> str:
@@ -825,7 +963,9 @@ def keeps_content(source: str, old: str, new: str, qualifiers: list[str], loose:
             and not missing_qualifiers(carried, new) and not missing_hedges(extract_hedges(old), new)
             and _negations(new) >= _negations(old) - (1 if added_negations(source, old) else 0)
             and not added_negations(source, new) and not invented_citations(source, new)
-            and keeps_statement(old, new) and not added_facts(old, new))
+            and keeps_statement(old, new) and not added_facts(old, new)
+            and _names_in(old, _NAMES) <= _names_in(new, _NAMES)
+            and (not SUBJUNCTIVE.search(QUOTE.sub(" ", old)) or bool(SUBJUNCTIVE.search(QUOTE.sub(" ", new)))))
 
 
 def clean_reply(reply: str) -> str:
@@ -845,7 +985,7 @@ def strip_list_echo(text: str) -> str:
     if not match:
         return text
     pieces = [p.strip(" .") for p in match.group(0).split(";") if p.strip(" .")]
-    if all(len(p.split()) <= 3 and (re.search(r"\d", p) or len(p.split()) == 1) for p in pieces):
+    if all(len(p.split()) <= 3 and (re.search(r"\d", p) or len(p.split()) == 1) and not TOKEN.search(p) for p in pieces):
         return text[:match.start()].rstrip(" ,;") + ("." if not text[:match.start()].rstrip().endswith(".") else "")
     return text
 
@@ -1027,12 +1167,71 @@ def drop_repeats(parts: list[str]) -> list[str]:
     kept = []
     for sentence in parts:
         rest = " ".join(kept)
-        unique = missing_facts(sentence, rest) or CITATION.search(sentence) or \
+        unique = missing_facts(sentence, rest) or any(c not in rest for c in CITATION.findall(sentence)) or \
             missing_hedges(extract_hedges(sentence), rest) or _negations(sentence) > _negations(rest)
-        if kept and not unique and sentence in repeated_sentences(" ".join(kept + [sentence])):
+        if kept and not unique and _mask(sentence).strip() in repeated_sentences(" ".join(kept + [sentence])):
             continue
         kept.append(sentence)
     return kept
+
+
+def dedupe_tokens(parts: list[str]) -> list[str]:
+    """Jeder Platzhalter eines Zitats oder einer Quellenangabe steht genau einmal. Setzt das Modell ihn ein zweites
+    Mal, etwa in eckigen Klammern "[⟦Qa⟧]" oder angehängt "… nicht enthalten und ⟦Qa⟧.", fällt die spätere Stelle weg."""
+    seen: set[str] = set()
+    out = []
+    for sentence in parts:
+        for token in dict.fromkeys(TOKEN.findall(sentence)):
+            if token in seen:
+                sentence = re.sub(r"(?:\s*,)?(?:\s+(?:und|sowie|bzw\.|oder))?\s*\[?\s*" + re.escape(token) + r"\s*\]?",
+                                  "", sentence)
+            seen.add(token)
+        sentence = re.sub(r"\s+([.,;:!?])", r"\1", sentence).strip()
+        if re.search(r"\w", sentence):
+            out.append(sentence)
+    return out
+
+
+def strip_token_debris(source: str, text: str, mapping: dict[str, str]) -> str:
+    """Entfernt kaputte oder fremde Platzhalter, die das Modell erfunden hat ("[⟧Za⟧", "⟦Zc⟧" ohne Zitat), samt
+    eckiger Klammer, wenn die Vorlage keine eckigen Klammern hat. Echte Platzhalter bleiben."""
+    keep: list[str] = []
+
+    def hide(m: re.Match) -> str:
+        if m.group(0) not in mapping:
+            return ""
+        keep.append(m.group(0))
+        return f"\x01{len(keep) - 1}\x02"
+    text = re.sub(r"⟦[QZ][a-z]+⟧", hide, text)
+    text = re.sub(r"[⟦⟧][QZ]?[a-z]*[⟦⟧]?", "", text)  # Reste wie "⟧Za⟦" oder ein einzelnes "⟧"
+    if "[" not in source:
+        text = re.sub(r"\[([^\s\].,;:!?]*)\]?", lambda m: m.group(1) if m.group(1).startswith("\x01") else "", text)
+    text = re.sub(r"\x01(\d+)\x02", lambda m: keep[int(m.group(1))], text)
+    return re.sub(r"\s+([.,;:!?])", r"\1", re.sub(r"  +", " ", text))
+
+
+def clumped_citations(source: str, sentence: str) -> bool:
+    """Stehen mehrere Quellenangaben ohne Text dazwischen gehäuft, die im Original bei verschiedenen Aussagen stehen?"""
+    return any(re.sub(r"\s+", " ", run) not in re.sub(r"\s+", " ", source)
+               for run in re.findall(r"⟦Q[a-z]+⟧(?:\s*⟦Q[a-z]+⟧)+", sentence))
+
+
+def strip_quote_echo(parts: list[str], mapping: dict[str, str]) -> list[str]:
+    """Streicht Nebensätze, die ein direktes Zitat noch einmal ohne Anführungszeichen nacherzählen, etwa
+    "… ⟦Za⟧ ⟦Qa⟧, was sie zu einer sehr einfachen Möglichkeit … macht." Der Inhalt steht ja schon im Zitat."""
+    quotes = [core_stems(o) for t, o in mapping.items() if t.startswith("⟦Z") and len(core_stems(o)) >= 3]
+    out = []
+    for sentence in parts:
+        for token, original in mapping.items():  # "als erste Versenkung ⟦Za⟧" mit ⟦Za⟧ = „erste Versenkung“
+            inner = original[1:-1].strip()
+            if token.startswith("⟦Z") and inner:
+                sentence = re.sub(r"(?<!\w)" + re.escape(inner) + r"\s+" + re.escape(token), token, sentence, flags=re.I)
+        end = sentence[-1] if sentence and sentence[-1] in ".!?" else ""
+        clauses = re.split(r",\s+", sentence[:-1] if end else sentence)
+        kept = clauses[:1] + [c for c in clauses[1:] if TOKEN.search(c) or not any(
+            len(core_stems(c) & q) / len(q) >= 0.7 and len(core_stems(c) - q) <= 2 for q in quotes)]
+        out.append(", ".join(kept) + end if len(kept) < len(clauses) else sentence)
+    return out
 
 
 def dropped_statements(source: str, result: str) -> list[str]:
@@ -1085,6 +1284,10 @@ def restore_facts(source: str, parts: list[str], complete: bool = False) -> tupl
                 del parts[invented]
                 changes += 1
             continue
+        clumped = next((i for i, p in enumerate(parts) if clumped_citations(source, p)), None)
+        if clumped is not None:
+            put(max(originals, key=lambda o: overlap(o, parts[clumped])), clumped)
+            continue
         moved = misplaced_citations(source, text)
         if moved:
             citation = moved[0][0]
@@ -1107,7 +1310,8 @@ def restore_facts(source: str, parts: list[str], complete: bool = False) -> tupl
             continue
         # Eine Aussage der Vorlage, von der in der Ausgabe so gut wie nichts mehr steht, eine verlorene Verneinung
         # ("sind keine Gegensätze") oder eine verlorene Abschwächung ("gilt häufig", "muss").
-        lost = [o for o in dropped_statements(source, text) + missing_negations(source, text) if o not in parts]
+        lost = [o for o in dropped_statements(source, text) + missing_negations(source, text)
+                + missing_attributions(source, text) + missing_subjunctive(source, text) if o not in parts]
         bad = next((i for i, p in enumerate(parts) if p not in originals and (added_negations(source, p)
                                                                               or invented_citations(source, p))), None)
         if bad is not None and not lost:
@@ -1187,6 +1391,32 @@ def vary_rhythm(source: str, parts: list[str], model: str, url: str, qualifiers:
 
 def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,
                       rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
+    """Versteckt Zitate und Quellenangaben hinter Platzhaltern, schreibt den Absatz um und setzt sie danach Zeichen
+    für Zeichen wieder ein. Das Modell kann sie so weder umformulieren noch übersetzen."""
+    masked, mapping = protect(paragraph)
+    quotes = {t: o for t, o in mapping.items() if t.startswith("⟦Z")}
+    legend = ("Platzhalter: ⟦Qa⟧, ⟦Qb⟧ … sind Quellenangaben, ⟦Za⟧, ⟦Zb⟧ … wörtliche Zitate. Übernimm jeden genau "
+              "einmal und unverändert, im Satz mit derselben Aussage. Schreib nie den Zitattext selbst hin. Zur "
+              "Orientierung, was die Zitate sagen:\n" + "\n".join(f"{t} = {o}" for t, o in quotes.items()) + "\n\n"
+              if mapping else "")
+    _ACTIVE.clear()
+    _ACTIVE.update(mapping)
+    _NAMES.clear()
+    _NAMES.update(author_names(paragraph))
+    try:
+        text, extra, qualifiers = _rewrite_masked(masked, style, model, url, pool, retries, rng, avoid, legend, mapping)
+    finally:
+        _ACTIVE.clear()
+        _NAMES.clear()
+    text = strip_token_debris(masked, normalize_tokens(text, mapping), mapping)
+    if not text.strip() or any(t not in text for t in mapping):  # Sicherheitsnetz: lieber das Original
+        return paragraph, extra, [unprotect(q, mapping) for q in qualifiers]
+    return unprotect(text, mapping), extra, [unprotect(q, mapping) for q in qualifiers]
+
+
+def _rewrite_masked(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,
+                    rng: random.Random | None = None, avoid: list[str] | None = None, legend: str = "",
+                    mapping: dict[str, str] | None = None) -> tuple[str, int, list[str]]:
     """Schreibt einen Absatz nach Bauplan um und repariert ihn danach Satz für Satz.
 
     1. Entwurf nach Bauplan; ist er grob daneben, höchstens retries neue Entwürfe mit Rückmeldung.
@@ -1202,7 +1432,7 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
     strict = style == "Akademisch"
     plan, example = sentence_plan(paragraph, pool, rng, strict)
     messages = [{"role": "system", "content": system_prompt(style, [example] if example else [])},
-                {"role": "user", "content": paragraph_request(paragraph, plan, avoid, qualifiers)}]
+                {"role": "user", "content": legend + paragraph_request(paragraph, plan, avoid, qualifiers)}]
     draft = flatten(_chat(model, url, messages))
     score, extra = paragraph_badness(paragraph, draft, plan, avoid, qualifiers, strict), 0
     for _ in range(retries):
@@ -1229,10 +1459,45 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
             parts, done = merge_pair(paragraph, parts, parts.index(a), model, url, qualifiers)
             merged += done
     parts, again = restore_facts(paragraph, parts)
-    stripped = drop_repeats([strip_list_echo(strip_stray_parens(paragraph, merge_doubled(strip_placeholders(
-        strip_stock_words(paragraph, p, qualifiers))))) for p in parts])
-    again += sum(a != b for a, b in zip(stripped, parts))
+    stripped = drop_repeats(strip_quote_echo(dedupe_tokens([strip_list_echo(strip_stray_parens(
+        paragraph, merge_doubled(strip_placeholders(strip_stock_words(paragraph, p, qualifiers))))) for p in parts]),
+        mapping or {}))
+    again += sum(a != b for a, b in zip(stripped, parts)) + abs(len(parts) - len(stripped))
     return " ".join(stripped), extra + repaired + restored + merged + again, qualifiers
+
+
+def chunks(paragraph: str) -> list[str]:
+    """Teilt einen langen Absatz (ab 6 Sätzen) in Stücke zu 3 bis 4 Sätzen. Ein lokales Modell hält bei kurzen
+    Stücken Aussagen, Zahlen und Quellen deutlich verlässlicher fest. Zitate werden nie zerschnitten."""
+    masked, mapping = protect(paragraph)
+    parts = raw_sentences(masked)
+    count = max(1, round(len(parts) / 3.5))
+    if count == 1:
+        return [paragraph]
+    size, extra = divmod(len(parts), count)
+    out, start = [], 0
+    for k in range(count):
+        end = start + size + (1 if k < extra else 0)
+        out.append(unprotect(" ".join(parts[start:end]), mapping))
+        start = end
+    return out
+
+
+def rewrite_block(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,
+                  rng: random.Random | None = None, avoid: list[str] | None = None) -> tuple[str, int, list[str]]:
+    """Schreibt einen Absatz um, lange Absätze Stück für Stück."""
+    avoid = list(avoid or [])
+    texts, extra, qualifiers = [], 0, []
+    for piece in chunks(paragraph):
+        if not needs_rewrite(piece):
+            texts.append(piece)
+            continue
+        text, more, found = rewrite_paragraph(piece, style, model, url, pool, retries, rng, avoid)
+        texts.append(text)
+        extra += more
+        qualifiers += found
+        avoid += [h for h in habits(text) if h not in avoid]
+    return " ".join(texts), extra, qualifiers
 
 
 def needs_rewrite(paragraph: str) -> bool:
@@ -1247,17 +1512,17 @@ def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, p
 
     Zurück kommen der Text, 1 plus die Zahl der Nachbesserungen und alle Einschränkungen, die erhalten bleiben sollten.
     """
-    paras = paragraphs(text)
+    paras, seps = split_blocks(text)
     todo = [i for i, p in enumerate(paras) if needs_rewrite(p)]
     # Die Wendungen sind von Anfang an verboten, nicht erst nach ihrem ersten Auftreten.
     out, extra, used, qualifiers = list(paras), 0, [name for _, name in HABITS], []
     for step, i in enumerate(todo, start=1):
         progress(step, len(todo))
-        out[i], more, found = rewrite_paragraph(paras[i], style, model, url, pool or [], retries, rng, used)
+        out[i], more, found = rewrite_block(paras[i], style, model, url, pool or [], retries, rng, used)
         extra += more
         qualifiers += found
         used += [h for h in habits(out[i]) if h not in used]
-    return "\n\n".join(out), 1 + extra, qualifiers
+    return "".join(p + sep for p, sep in zip(out, seps)).strip(), 1 + extra, qualifiers
 
 
 FACT = re.compile(r"\d+(?:[.,:/-]\d+)*")
@@ -1562,7 +1827,43 @@ def echo_pairs(result: str) -> list[tuple[str, str]]:
     return pairs
 
 
+HEADING = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+\S.*|[^.!?;:]{1,80})$")
+
+
+def is_heading(line: str) -> bool:
+    """Kurze Zeile ohne Satzende, gern nummeriert ("2.1 Vorformen in Antike"): Überschrift, bleibt wie sie ist."""
+    line = line.strip()
+    return bool(line) and len(line.split()) <= 14 and not re.search(r"[.!?]\s*$", line) and bool(HEADING.match(line))
+
+
+def split_blocks(text: str) -> tuple[list[str], list[str]]:
+    """Teilt einen Text in Absätze und merkt sich, was dazwischen stand. Absätze trennt eine Leerzeile oder ein
+    einfacher Zeilenumbruch nach einem Satzende oder einer Überschrift, wie beim Kopieren aus Word. Ein Umbruch
+    mitten im Satz bleibt im Absatz. Liefert (Absätze, Trenner danach)."""
+    parts = re.split(r"(\n\s*)", text.strip())
+    blocks, seps, current = [], [], ""
+    for i in range(0, len(parts), 2):
+        line = parts[i]
+        sep = parts[i + 1] if i + 1 < len(parts) else ""
+        current = (current + " " + line.strip()).strip() if current else line.strip()
+        nxt = parts[i + 2] if i + 2 < len(parts) else ""
+        # Geht die nächste Zeile klein weiter, war es ein Umbruch mitten im Satz, keine Überschrift.
+        starts_new = bool(re.match(r"\s*[A-ZÄÖÜ0-9„\"»(]", nxt))
+        ends = re.search(r"[.!?:“”\")»«]\s*$", line) or (is_heading(line) and starts_new)
+        if not sep or sep.count("\n") > 1 or ends or is_heading(nxt):
+            if current:
+                blocks.append(current)
+                seps.append("\n\n" if sep.count("\n") > 1 else ("\n" if sep else ""))
+            current = ""
+    return blocks, seps
+
+
 def paragraphs(text: str) -> list[str]:
+    return split_blocks(text)[0]
+
+
+def raw_paragraphs(text: str) -> list[str]:
+    """Absätze nur an Leerzeilen, für die Stilvorlagen aus Büchern mit festen Zeilenumbrüchen."""
     return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
 
@@ -1576,6 +1877,9 @@ def shrinkage(source: str, result: str) -> int:
 
 def warnings(source: str, result: str, qualifiers: list[str] | None = None, strict: bool = False) -> str:
     parts = []
+    hints = original_hints(source)
+    if hints:
+        parts.append("Im Original (bleibt so): " + "; ".join(hints))
     if strict and fragments(result):
         parts.append("Satzfragment: " + " / ".join(f'"{f}"' for f in fragments(result)))
     left = habits(result)
@@ -1588,6 +1892,13 @@ def warnings(source: str, result: str, qualifiers: list[str] | None = None, stri
     if weaker:
         parts.append("Abschwächung fehlt, Aussage jetzt absoluter: " + ", ".join(dict.fromkeys(weaker)))
     pairs = list(zip(paragraphs(source), paragraphs(result)))
+    for sentence in [x for a, b in pairs for x in missing_attributions(a, b)]:
+        parts.append(f'Autor nicht mehr genannt, jetzt eigene Behauptung: "{sentence[:60]}"')
+    for sentence in [x for a, b in pairs for x in missing_subjunctive(a, b)]:
+        parts.append(f'Konjunktiv der Wiedergabe fehlt: "{sentence[:60]}"')
+    changed = [q for q in QUOTE.findall(source) if q not in result]
+    if changed:
+        parts.append("Zitat verändert oder fehlt: " + " / ".join(changed[:3]))
     for sentence in [x for a, b in pairs for x in missing_negations(a, b)]:
         parts.append(f'Verneinung fehlt: "{sentence[:60]}"')
     for sentence in [x for a, b in pairs for x in dropped_statements(a, b)]:
@@ -1692,6 +2003,19 @@ class App:
         tk.Button(bar, text="Meine Texte …", command=self.open_own_texts, bg=PANEL, fg=FG, activebackground="#333333",
                   activeforeground=FG, relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
                   padx=12, pady=4, cursor="hand2").pack(side="left")
+        tk.Button(bar, text="Text laden …", command=self.load_text, bg=PANEL, fg=FG, activebackground="#333333",
+                  activeforeground=FG, relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
+                  padx=12, pady=4, cursor="hand2").pack(side="left", padx=(16, 0))
+        tk.Button(bar, text="Quellen …", command=self.add_sources, bg=PANEL, fg=FG, activebackground="#333333",
+                  activeforeground=FG, relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
+                  padx=12, pady=4, cursor="hand2").pack(side="left", padx=(8, 0))
+        self.sources_label = tk.Label(bar, text="", bg=BG, fg=MUTED, font=("Segoe UI", 10))
+        self.sources_label.pack(side="left", padx=8)
+        self.sources_clear = tk.Button(bar, text="Quellen leeren", command=self.clear_sources, bg=PANEL, fg=FG,
+                                       activebackground="#333333", activeforeground=FG, relief="flat", bd=0,
+                                       highlightthickness=0, font=("Segoe UI", 10), padx=12, pady=4, cursor="hand2")
+        self.source_paths = [p for p in self.settings.get("quellen", []) if os.path.exists(p)]
+        self._show_sources()
 
         bottom = tk.Frame(root, bg=BG)
         bottom.pack(side="bottom", fill="x", padx=24, pady=16)
@@ -2050,6 +2374,61 @@ class App:
             return
         self.root.destroy()
 
+    def load_text(self) -> None:
+        path = filedialog.askopenfilename(title="Text laden", filetypes=[
+            ("Texte", "*.docx *.pdf *.txt"), ("Word", "*.docx"), ("PDF", "*.pdf"), ("Text", "*.txt")])
+        if not path:
+            return
+        try:
+            text = read_document(path)
+        except DocumentError as e:
+            self.status.config(text=str(e), fg=ACCENT)
+            return
+        self.input.delete("1.0", "end")
+        self.input.insert("1.0", text)
+        self.status.config(text=f"Geladen: {os.path.basename(path)} ({len(text.split())} Wörter)", fg=MUTED)
+
+    def add_sources(self) -> None:
+        paths = filedialog.askopenfilenames(title="Quellen wählen (Literaturverzeichnis, Quellen-PDFs)", filetypes=[
+            ("Quellen", "*.docx *.pdf *.txt"), ("Word", "*.docx"), ("PDF", "*.pdf"), ("Text", "*.txt")])
+        problems = []
+        for path in paths:
+            try:
+                read_document(path)
+            except DocumentError as e:
+                problems.append(str(e))
+                continue
+            if path not in self.source_paths:
+                self.source_paths.append(path)
+        self.settings["quellen"] = self.source_paths
+        save_settings(self.settings)
+        self._show_sources()
+        if problems:
+            self.status.config(text="  ".join(problems), fg=ACCENT)
+
+    def clear_sources(self) -> None:
+        self.source_paths = []
+        self.settings["quellen"] = []
+        save_settings(self.settings)
+        self._show_sources()
+
+    def _show_sources(self) -> None:
+        n = len(self.source_paths)
+        self.sources_label.config(text=f"{n} Quelle{'n' if n != 1 else ''} geladen" if n else "keine Quellen")
+        if n:
+            self.sources_clear.pack(side="left")
+        else:
+            self.sources_clear.pack_forget()
+
+    def _source_texts(self) -> list[str]:
+        texts = []
+        for path in self.source_paths:
+            try:
+                texts.append(read_document(path))
+            except (DocumentError, OSError):
+                continue
+        return texts
+
     def open_own_texts(self) -> None:
         folder = user_dir()
         try:
@@ -2080,7 +2459,8 @@ class App:
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
             f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))
         strict = self.last_style == "Akademisch"
-        self.warning.config(text="  ".join(filter(None, [warnings(source, result, qualifiers, strict), note])))
+        self.warning.config(text="  ".join(filter(None, [warnings(source, result, qualifiers, strict),
+                                                         source_hints(source, self._source_texts()), note])))
 
     def _on_cleared(self, count: int) -> None:
         self.clear.config(state="normal")
@@ -2145,10 +2525,127 @@ class App:
                             self.status.config(text=before, fg=color))
 
 
+# --- Texte und Quellen aus Dateien ------------------------------------------------------------------------------
+
+class DocumentError(Exception):
+    pass
+
+
+WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def read_docx(path: str) -> str:
+    """Text einer Word-Datei (.docx), Absatz für Absatz. Braucht kein Zusatzpaket: .docx ist ein ZIP mit XML."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            root = ElementTree.fromstring(z.read("word/document.xml"))
+    except (zipfile.BadZipFile, KeyError, ElementTree.ParseError) as e:
+        raise DocumentError(f"{os.path.basename(path)} ist keine lesbare Word-Datei ({e}).") from e
+    lines = []
+    for para in root.iter(WORD_NS + "p"):
+        text = ""
+        for node in para.iter():
+            if node.tag == WORD_NS + "t":
+                text += node.text or ""
+            elif node.tag == WORD_NS + "tab":
+                text += "\t"
+            elif node.tag in (WORD_NS + "br", WORD_NS + "cr"):
+                text += "\n"
+        lines.append(text)
+    return "\n".join(lines).strip()
+
+
+def read_pdf(path: str) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError as e:
+        raise DocumentError("PDFs lesen braucht das Paket pypdf (pip install pypdf). In der Humanizer.exe ist es dabei.") from e
+    try:
+        reader = PdfReader(path)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as e:  # pypdf wirft je nach Fehler verschiedene Ausnahmen
+        raise DocumentError(f"{os.path.basename(path)} ließ sich nicht lesen ({e}).") from e
+    if not text.strip():
+        raise DocumentError(f"In {os.path.basename(path)} ist kein Text gefunden worden, vermutlich ein Scan.")
+    return text
+
+
+def read_document(path: str) -> str:
+    """Text aus .txt, .docx oder .pdf."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".docx":
+        return read_docx(path)
+    if ext == ".pdf":
+        return read_pdf(path)
+    if ext in (".txt", ".md", ""):
+        for encoding in ("utf-8-sig", "cp1252"):
+            try:
+                return open(path, encoding=encoding).read()
+            except UnicodeDecodeError:
+                continue
+    raise DocumentError(f"{os.path.basename(path)}: Dieses Format kann die App nicht lesen (nur .txt, .docx, .pdf).")
+
+
+def _searchable(text: str) -> str:
+    """Für die Zitatsuche: Groß/Klein, Anführungszeichen, Silbentrennung am Zeilenende und Leerraum egal."""
+    text = text.replace("\u00ad", "")
+    text = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", text)
+    text = re.sub(r"[„“”\"»«‚‘’']", "", text)
+    text = re.sub(r"[‐‑‒–—]", "-", text)
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def quotes_not_in_sources(text: str, sources: list[str]) -> list[str]:
+    """Direkte Zitate des Texts, die in keiner geladenen Quelle vorkommen."""
+    haystack = " ".join(_searchable(s) for s in sources)
+    missing = []
+    for quote in dict.fromkeys(QUOTE.findall(text)):
+        needle = _searchable(quote).rstrip(".,;:")
+        if len(needle.split()) >= 2 and needle not in haystack:
+            missing.append(quote)
+    return missing
+
+
+def citations_not_in_sources(text: str, sources: list[str]) -> list[str]:
+    """Quellenangaben, deren Autor oder Jahr in keiner geladenen Quelle (Literaturverzeichnis oder Quelle selbst)
+    vorkommt."""
+    haystack = " ".join(sources)
+    missing = []
+    for citation in dict.fromkeys(CITATION.findall(text)):
+        if TOKEN.fullmatch(citation):
+            continue
+        for part in citation.strip("()").split(";"):
+            authors = [a for a in citation_parts("(" + part + ")")[0] if a not in ("S", "Vgl", "Editors")]
+            years = re.findall(r"\b1[4-9]\d\d\b|\b20\d\d\b", part)
+            if any(not re.search(r"\b" + re.escape(a) + r"\b", haystack) for a in authors) or \
+                    any(y not in haystack for y in years):
+                missing.append(part.strip())
+    return list(dict.fromkeys(missing))
+
+
+def source_hints(text: str, sources: list[str]) -> str:
+    if not sources:
+        return ""
+    hints = []
+    quotes = quotes_not_in_sources(text, sources)
+    if quotes:
+        hints.append("Zitat nicht in den Quellen gefunden: " + " / ".join(q[:70] for q in quotes))
+    citations = citations_not_in_sources(text, sources)
+    if citations:
+        hints.append("Quelle nicht in den geladenen Dateien: " + "; ".join(citations))
+    return ("Quellen-Check: " + "  ·  ".join(hints)) if hints else "Quellen-Check: alle Zitate und Angaben gefunden."
+
+
 def selftest(target: str) -> None:
     """Prüfung für den Build: schreibt, welche Version das ist und ob die Beispieltexte in der .exe stecken."""
     with open(target, "w", encoding="utf-8") as out:
-        json.dump({"build": BUILD, **{g: len(bundled_texts(g)) for g in ("sachlich", "bericht", "locker")}}, out)
+        try:
+            import pypdf  # noqa: F401  (muss im Build stecken, sonst kann die App keine PDFs lesen)
+            has_pdf = True
+        except ImportError:
+            has_pdf = False
+        json.dump({"build": BUILD, "pdf": has_pdf,
+                   **{g: len(bundled_texts(g)) for g in ("sachlich", "bericht", "locker")}}, out)
 
 
 def main() -> None:

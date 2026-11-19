@@ -1300,3 +1300,191 @@ def test_klammer_echo_wiederholung_und_umgestellte_verneinung():
     # Klammern aus dem Original bleiben.
     keep = "Die Halle (ein ehemaliger Lokschuppen am Stadtrand) fasst viele Gäste."
     assert h.strip_stray_parens(keep, keep) == keep
+
+
+# --- Zitate, Quellenangaben, Zuschreibungen, Dateien --------------------------------------------------------------
+
+def _docx(path, paragraphs_):
+    import zipfile
+    body = "".join(f'<w:p><w:r><w:t xml:space="preserve">{p}</w:t></w:r></w:p>' for p in paragraphs_)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        z.writestr("word/document.xml", '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.'
+                   'openxmlformats.org/wordprocessingml/2006/main"><w:body>' + body + '</w:body></w:document>')
+
+
+def _pdf(path, lines):
+    """Kleinste gültige PDF mit Text, ohne Zusatzpaket."""
+    stream = "BT /F1 11 Tf 50 750 Td 14 TL " + " ".join(f"({l}) Tj T*" for l in lines) + " ET"
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    out, offsets = b"%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n{o}\nendobj\n".encode("latin-1")
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode() + "".join(f"{o:010d} 00000 n \n" for o in offsets).encode()
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode()
+    open(path, "wb").write(out)
+
+
+def test_absaetze_an_einfachen_umbruechen_und_ueberschriften():
+    text = ("2 Ursprünge: Von Japan nach Europa\nDie Bühne ist jung. Sie kam spät.\n2.1 Vorformen in der Antike\n"
+            "Ein Satz läuft\nüber zwei Zeilen weiter.\n\nNeuer Absatz hier.")
+    blocks, seps = h.split_blocks(text)
+    assert blocks == ["2 Ursprünge: Von Japan nach Europa", "Die Bühne ist jung. Sie kam spät.",
+                      "2.1 Vorformen in der Antike", "Ein Satz läuft über zwei Zeilen weiter.", "Neuer Absatz hier."]
+    assert seps == ["\n", "\n", "\n", "\n\n", ""]
+    assert h.is_heading("2.5 Quellenkritik") and not h.is_heading("Die Bühne ist jung.")
+
+
+def test_quellenangaben_in_allen_formen():
+    found = h.CITATION.findall(
+        "A (Hendrickson und Buckhurst, 2013, S. 359). B (vgl. Britannica Editors, o. J.). C (vgl. Koch, 1993, S. 31; "
+        "Semper, 1904, S. 323 f.). D (vgl. Tsuboi, 2002, S. 208 und S. 211 f.). E (Brockett et al., 2010, S. 200).")
+    assert len(found) == 5
+    for plain in ("Osaka (Kadoza) baute", "in den Jahren (1715 bis 1735)", "Namiki (1758)", "(vgl. Koch, 1993, S. 359. Bei"):
+        assert h.CITATION.findall(plain) == []
+
+
+def test_platzhalter_hin_und_zurueck():
+    text = ("Grösel schreibt, eine Drehscheibe biete „eine sehr einfache Möglichkeit zur Verwandlung“ (Grösel, 2007, "
+            "S. 94). Britannica stimmt zu (vgl. Britannica Editors, o. J.).")
+    masked, mapping = h.protect(text)
+    assert "„" not in masked and "Grösel, 2007" not in masked and len(mapping) == 3
+    assert h.unprotect(masked, mapping) == text
+    assert h.normalize_tokens("x [Qa] und ⟦ Zb ⟧", {}) == "x ⟦Qa⟧ und ⟦Zb⟧"
+    assert h.normalize_tokens("biete „eine sehr einfache Möglichkeit zur Verwandlung“", mapping) == "biete ⟦Za⟧"
+
+
+def test_zitate_und_quellen_bleiben_zeichengenau(monkeypatch):
+    para = ("Hendrickson und Buckhurst bezeichnen das Drehen von Szenerie als „relatively recent introduction into "
+            "Western set design“ (Hendrickson und Buckhurst, 2013, S. 359). Grösel beschreibt den Nutzen technisch: Eine "
+            "Drehscheibe biete „eine sehr einfache Möglichkeit zur Verwandlung des Bühnenbildes“ (Grösel, 2007, S. 94).")
+    # Modell 1: verbiegt die Platzhalter leicht, behält sie aber.
+    good = ("Als ⟦Za⟧ [Qa] bezeichnen Hendrickson und Buckhurst das Drehen von Szenerie. Technisch beschreibt "
+            "Grösel den Nutzen so: Eine Drehscheibe biete ⟦Zb⟧ ⟦Qb⟧.")
+    stub_chat(monkeypatch, {"Drehen": good})
+    out, _, _ = h.rewrite_paragraph(para, "Akademisch", "m", "u", [])
+    for q in h.QUOTE.findall(para) + h.CITATION.findall(para):
+        assert q in out
+    # Modell 2: übersetzt das Zitat und lässt die Quelle weg → die Originalsätze kommen zurück.
+    bad = ("Hendrickson und Buckhurst nennen das Drehen eine relativ neue Einführung. Grösel sagt, die Drehscheibe "
+           "bietet eine einfache Möglichkeit.")
+    stub_chat(monkeypatch, {"Drehen": bad})
+    out, _, _ = h.rewrite_paragraph(para, "Akademisch", "m", "u", [])
+    for q in h.QUOTE.findall(para) + h.CITATION.findall(para):
+        assert q in out
+    assert "biete „" in out
+
+
+def test_zuschreibung_und_konjunktiv():
+    src = ("Grösel beschreibt den Nutzen: Eine Drehscheibe biete eine einfache Verwandlung (Grösel, 2007, S. 94). "
+           "Nach Koch bestand sie aus 16 Segmenten (vgl. Koch, 1993, S. 32).")
+    assert h.author_names(src) == {"Grösel", "Koch"}
+    lost = "Eine Drehscheibe bietet eine einfache Verwandlung (Grösel, 2007, S. 94). Sie bestand aus 16 Segmenten (vgl. Koch, 1993, S. 32)."
+    assert len(h.missing_attributions(src, lost)) == 2
+    assert h.missing_subjunctive(src, lost) == [h.raw_sentences(src)[0]]
+    kept = ("Den Nutzen beschreibt Grösel so: Eine Drehscheibe biete eine einfache Verwandlung (Grösel, 2007, S. 94). "
+            "Sie bestand nach Koch aus 16 Segmenten (vgl. Koch, 1993, S. 32).")
+    assert h.missing_attributions(src, kept) == [] and h.missing_subjunctive(src, kept) == []
+    out, n = h.restore_facts(src, h.raw_sentences(lost), complete=True)
+    assert "Grösel beschreibt" in " ".join(out) and "Nach Koch" in " ".join(out)
+
+
+def test_hinweise_zum_original():
+    text = ("Sie gerieten in Vergessenheit (vgl. Hendrickson und Buckhurst, 2013, S. 359. Bei Leonardo gehen die Angaben "
+            "auseinander. Brockett et al. datieren seinen Entwurf auf 1496 (vgl. Brockett et al., 2010, S. 200). "
+            "Brockett et al. datieren seinen Entwurf auf 1496 (vgl. Brockett et al., 2010, S. 200).")
+    hints = h.original_hints(text)
+    assert any(x.startswith("Klammer nicht geschlossen") for x in hints)
+    assert any(x.startswith("Satz wiederholt") for x in hints)
+    assert "Im Original" in h.warnings(text, text, strict=True)
+
+
+def test_dateien_lesen_und_quellen_pruefen(tmp_path):
+    docx = str(tmp_path / "literatur.docx")
+    _docx(docx, ["Literaturverzeichnis", "Grösel, Bernhard (2007): Bühnentechnik. München.",
+                 "Koch, Anna (1993): Die Drehbühne. Diplomarbeit."])
+    assert "Grösel, Bernhard (2007)" in h.read_docx(docx)
+    pdf = str(tmp_path / "quelle.pdf")
+    _pdf(pdf, ["Turntables are a relatively recent intro-", "duction into Western set design."])
+    assert "Western set design" in h.read_document(pdf)
+    txt = tmp_path / "alt.txt"
+    txt.write_bytes("Bühne".encode("cp1252"))
+    assert h.read_document(str(txt)) == "Bühne"
+    with pytest.raises(h.DocumentError):
+        h.read_document(str(tmp_path / "x.odt"))
+    sources = [h.read_document(docx), h.read_document(pdf)]
+    text = ("Sie sei eine „relatively recent introduction into Western set design“ (Hendrickson und Buckhurst, 2013, "
+            "S. 359). Laut Grösel „ganz anders formuliert“ (Grösel, 2007, S. 94).")
+    assert h.quotes_not_in_sources(text, sources) == ["„ganz anders formuliert“"]
+    assert h.citations_not_in_sources(text, sources) == ["Hendrickson und Buckhurst, 2013, S. 359"]
+    assert h.source_hints(text, sources).startswith("Quellen-Check: Zitat nicht in den Quellen gefunden")
+    assert h.source_hints(text, []) == ""
+
+
+def test_selbsttest_meldet_pdf(tmp_path):
+    target = str(tmp_path / "s.json")
+    h.selftest(target)
+    assert json.load(open(target))["pdf"] is True
+
+
+def test_abkuerzungen_in_quellenangaben():
+    text = "Wien 1708 (vgl. Stadtarchiv Wien, o. J.). Danach kam mehr. Er war bei Koyo Seiko Co., Ltd. in Osaka tätig."
+    assert len(h.raw_sentences(text)) == 3 and h.fragments(text) == []
+
+
+def test_lange_absaetze_werden_stueckweise_umgeschrieben():
+    saetze = [f"Satz {i} sagt etwas „mit einem Zitat. Und Punkt“ (vgl. Koch, 1993, S. {i})." for i in range(9)]
+    stuecke = h.chunks(" ".join(saetze))
+    assert [len(h.raw_sentences(h.protect(s)[0])) for s in stuecke] == [3, 3, 3]
+    assert " ".join(stuecke) == " ".join(saetze)  # nichts verloren, kein Zitat zerschnitten
+    assert h.chunks("Kurz. Auch kurz. Noch einer.") == ["Kurz. Auch kurz. Noch einer."]
+
+
+def test_doppelte_quellenangabe_faellt_weg():
+    teile = ["Koch nennt 1716 ⟦Qa⟧.", "Ein Beleg fehlt in unseren Quellen und ⟦Qa⟧.", "Sie waren einfach [⟦Qa⟧]."]
+    assert h.dedupe_tokens(teile) == ["Koch nennt 1716 ⟦Qa⟧.", "Ein Beleg fehlt in unseren Quellen.", "Sie waren einfach."]
+    assert h.dedupe_tokens(["Kurz.", "Lang ⟦Qa⟧ und ⟦Qb⟧."]) == ["Kurz.", "Lang ⟦Qa⟧ und ⟦Qb⟧."]
+
+
+def test_zitat_wird_nicht_nacherzaehlt():
+    mapping = {"⟦Za⟧": "„eine sehr einfache Möglichkeit zur Verwandlung des Bühnenbildes“", "⟦Qa⟧": "(Grösel, 2007, S. 94)"}
+    satz = "Eine Drehscheibe biete ⟦Za⟧ ⟦Qa⟧, was sie zu einer sehr einfachen Möglichkeit zur Verwandlung des Bühnenbildes macht."
+    assert h.strip_quote_echo([satz], mapping) == ["Eine Drehscheibe biete ⟦Za⟧ ⟦Qa⟧."]
+    anders = "Eine Drehscheibe biete ⟦Za⟧ ⟦Qa⟧, wobei Reinhardt sie später künstlerisch einsetzte."
+    assert h.strip_quote_echo([anders], mapping) == [anders]
+
+
+def test_wiederholung_mit_schon_genannter_quelle_faellt_weg():
+    teile = ["Brockett et al. datieren Leonardos Entwurf für Danae auf 1496 ⟦Qa⟧.",
+             "Leonardos Entwurf für Danae datieren Brockett et al. auf 1496 ⟦Qa⟧.",
+             "Leonardos Entwurf für Danae datieren Brockett et al. ebenfalls auf 1496 ⟦Qb⟧."]
+    assert h.drop_repeats(teile) == [teile[0], teile[2]]  # eigene Quelle ⟦Qb⟧ bleibt, sie steht im Original
+
+
+def test_kaputte_platzhalter_kommen_nie_in_den_text():
+    m = {"⟦Qa⟧": "(vgl. A, 2000)", "⟦Qb⟧": "(vgl. B, 2001)"}
+    src = "Er nennt 1758 auf S. 207 ⟦Qa⟧. Sugino wird zitiert ⟦Qb⟧."
+    out = h.strip_token_debris(src, "Er nennt 1758 auf S. 207 [207. Sugino wird zitiert [⟧Za⟧ ⟦Zc⟧ [⟦Qa⟧] ⟦Qb⟧.", m)
+    assert out == "Er nennt 1758 auf S. 207. Sugino wird zitiert ⟦Qa⟧ ⟦Qb⟧."
+    assert h.strip_token_debris(src, "Semper notierte 1904 [⟧ und [⟧Za⟦] ⟦Qa⟧ ⟦Qb⟧.", m) == "Semper notierte 1904 und ⟦Qa⟧ ⟦Qb⟧."
+
+
+def test_gehaeufte_quellen_werden_erkannt():
+    src = "Koch nennt 1716 ⟦Qa⟧, Tsuboi 1758 ⟦Qb⟧. Beide bestätigen 1896 ⟦Qc⟧ ⟦Qd⟧."
+    assert h.clumped_citations(src, "Koch nennt 1716, Tsuboi 1758 ⟦Qa⟧ ⟦Qb⟧.")
+    assert not h.clumped_citations(src, "1896 bestätigen beide ⟦Qc⟧ ⟦Qd⟧.")
+    parts, _ = h.restore_facts(src, ["Koch nennt 1716, Tsuboi 1758 ⟦Qa⟧ ⟦Qb⟧.", "1896 bestätigen beide ⟦Qc⟧ ⟦Qd⟧."])
+    assert parts[0] == "Koch nennt 1716 ⟦Qa⟧, Tsuboi 1758 ⟦Qb⟧."
+
+
+def test_zitat_steht_nur_einmal_und_ohne_vorgesagten_text():
+    teile = ["Arnold und Pech nennen sie ⟦Za⟧ ⟦Qa⟧.", "Das fasst dieses Kapitel zusammen ⟦Za⟧."]
+    assert h.dedupe_tokens(teile) == ["Arnold und Pech nennen sie ⟦Za⟧ ⟦Qa⟧.", "Das fasst dieses Kapitel zusammen."]
+    mapping = {"⟦Za⟧": "„erste Versenkung“"}
+    assert h.strip_quote_echo(["Sie zählen andere Bauarten als erste Versenkung ⟦Za⟧."], mapping) == \
+        ["Sie zählen andere Bauarten als ⟦Za⟧."]

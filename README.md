@@ -126,7 +126,7 @@ Läuft Ollama auf einem anderen Rechner oder Port, die Adresse über die Umgebun
 
 ## Testreihe: so gut ist der Stand gemessen
 
-In `werkzeuge/testtexte/` liegen fünf KI-typische Texte zu Event-Engineering-Themen (Nachhaltigkeit, Technikgeschichte, Sponsoring, Zeitplanung, Kaffeekultur), vier akademisch, einer locker. Die Quellenangaben darin sind erfunden. `werkzeuge/testreihe.py` schreibt jeden Text um und prüft das Ergebnis gegen feste Kriterien:
+In `werkzeuge/testtexte/` liegen sechs KI-typische Texte zu Event-Engineering-Themen (Nachhaltigkeit, Technikgeschichte, Sponsoring, Zeitplanung, Kaffeekultur, Bühnenversenkung), fünf akademisch, einer locker. Der sechste ist wie ein Uni-Kapitel gebaut: nummerierte Überschriften, einfache Zeilenumbrüche, direkte Zitate auf Deutsch und Englisch, Quellenangaben mit und ohne "vgl.", "o. J.", Autoren im Fließtext und indirekte Rede. Alle Quellenangaben darin sind erfunden. `werkzeuge/testreihe.py` schreibt jeden Text um und prüft das Ergebnis gegen feste Kriterien:
 
 | Kriterium | Grenze |
 |---|---|
@@ -141,6 +141,10 @@ In `werkzeuge/testtexte/` liegen fünf KI-typische Texte zu Event-Engineering-Th
 | Sätze ohne Grundlage im Original | höchstens 1 |
 | Teilsätze ohne Grundlage ("…, und es gibt keine Belege dafür") | höchstens 1 |
 | Wiederholungen (ganzer Satz oder doppelte Satzhälfte) | keine |
+| direkte Zitate oder Quellenangaben verändert | keine |
+| Überschriften verändert | keine |
+| Zuschreibungen fehlen ("Nach Koch …" wird zur eigenen Behauptung) | keine |
+| Konjunktiv der indirekten Rede verloren ("biete" → "bietet") | höchstens 1 |
 | Füllsätze und Satzmuster-Echos ("Sicherheit ist entscheidend.") | höchstens 1 |
 | Satzfragmente (akademisch) | keine |
 | Floskeln, KI-Überleitungen, Kommasätze | höchstens 2, wie bei echten Menschentexten |
@@ -150,9 +154,20 @@ In `werkzeuge/testtexte/` liegen fünf KI-typische Texte zu Event-Engineering-Th
 
 Die Prüfungen auf Füllsätze, Echos, Kommasätze und doppelte Satzhälften sind an rund 5.500 echten Menschentexten aus `beispieltexte/` geeicht: Dort schlagen sie in höchstens 1 bis 2 % der Texte an.
 
-**Gemessen mit `gemma3:12b`: 7 von 10 Läufen bestanden** (fünf Texte, je zwei Läufe). In keinem Lauf fehlt eine Zahl, Quelle, Einschränkung, Abschwächung, Verneinung oder Aussage, und nichts ist erfunden. Die drei Fehlschläge sind Stil: zweimal zu gleichmäßige Satzlängen (Streuung 0,42 und 0,36), zweimal ein Satz, der eine Aussage aus einem anderen Absatz wiederholt.
+**Gemessen mit `gemma3:12b`: 5 von 12 Läufen bestanden** (sechs Texte, je zwei Läufe). Das Ziel von 8 von 10 ist damit verfehlt.
 
-Zum Vergleich: Die Vorversion kam mit den alten Kriterien auf 8 von 10. Mit den neuen fällt sie fast komplett durch, vor allem wegen verlorener Verneinungen am Textende, und in einem Lauf stand eine erfundene Quelle "(vgl. [Smith, 2020])".
+| Text | bestanden | woran es scheiterte |
+|---|---|---|
+| Nachhaltigkeit | 1 von 2 | eine Aussage fehlt |
+| Technikgeschichte | 0 von 2 | Teilsätze ohne Grundlage; Wiederholung, fehlender Schlusssatz, 3 Sätze kaum verändert |
+| Sponsoring | 1 von 2 | 4 Floskeln |
+| Zeitplanung | 2 von 2 | – |
+| Kaffeekultur | 1 von 2 | Streuung 0,43, 3 Sätze kaum verändert |
+| Bühnenversenkung | 0 von 2 | Teilsätze ohne Grundlage; Wiederholung, fehlender Satz, kaum veränderte Sätze |
+
+Was in allen zwölf Läufen hält: Kein direktes Zitat, keine Quellenangabe und keine Überschrift wurde verändert, keine Quelle fehlt oder ist erfunden, keine Zahl fehlt oder ist erfunden. Die Fehlschläge: dreimal fehlt eine Aussage des Originals ganz, dazu hinzugedichtete Halbsätze, Wiederholungen, zu viele Floskeln und Sätze, die das Modell kaum umformuliert hat.
+
+Zum Vergleich: Das vorige Release kam auf den fünf alten Texten auf 7 von 10, dieser Stand dort auf 5 von 10. Bei zwei Läufen pro Text schwankt das stark. Dafür richtet das vorige Release bei echten Uni-Kapiteln Schaden an: Überschriften verschmelzen mit dem Text, Quellenangaben ohne "vgl." sind ungeschützt, Zitate können umformuliert oder übersetzt werden.
 
 Ein echter Lauf eines Nutzers liegt als fester Prüffall in `werkzeuge/pruefaelle/`.
 
@@ -162,7 +177,7 @@ Selbst laufen lassen, zum Beispiel mit dem 24b-Modell (dauert je nach Rechner ei
 python werkzeuge/testreihe.py --model mistral-small3.2:24b
 ```
 
-Was die Testreihe nicht sieht: inhaltlich verdrehte Aussagen ohne Signalwort (aus "1888 folgte das Burgtheater" wird "1888 entstand das Burgtheater") und Umschreibungen, die mit anderen Wörtern etwas dazudichten. Vor allem bei Uni-Texten die Ausgabe gegen das Original lesen.
+Was die Testreihe nicht sieht: inhaltlich verdrehte Aussagen ohne Signalwort (aus "1888 folgte das Burgtheater" wird "1888 entstand das Burgtheater", aus "die meisten Opernhäuser hatten mindestens zwei Versenkungen" wird "mindestens zwei Opernhäuser hatten Versenkungen") und Umschreibungen, die mit anderen Wörtern etwas dazudichten. Je dichter ein Absatz mit Quellen und Jahreszahlen ist, etwa in einer Quellenkritik, desto häufiger passiert das. Bei Uni-Texten die Ausgabe immer gegen das Original lesen.
 
 ## Tests
 

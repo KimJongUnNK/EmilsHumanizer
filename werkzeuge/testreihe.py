@@ -8,6 +8,7 @@ import glob
 import json
 import os
 import random
+import re
 import sys
 import time
 
@@ -18,11 +19,12 @@ import humanizer as h  # noqa: E402
 def check(source: str, out: str, style: str) -> dict:
     """Jedes Kriterium als (Messwert, bestanden)."""
     strict = style == "Akademisch"
-    # Absätze gleicher Position gehören zusammen; Überschriften und Einzeiler der Vorlage bleiben außen vor.
-    pairs = [(a, b) for a, b in zip(h.paragraphs(source), h.paragraphs(out)) if h.needs_rewrite(a)]
+    # Zusammengehörige Absätze; Überschriften, Einzeiler, Deckblatt, Verzeichnisse und Platzhalter bleiben außen vor.
+    pairs = h.rewritten_pairs(source, out)
     src_paras = [a for a, _ in pairs]
     qualifiers = [q for p in src_paras for q in h.extract_qualifiers(p)]
-    count = max(len(h.sentences(out)), 1)
+    body = " ".join(b for _, b in pairs) or out  # nur der umgeschriebene Text, ohne Verzeichnisse und Überschriften
+    count = max(len(h.sentences(body)), 1)
     ratio = len(out.split()) / max(len(source.split()), 1)
     values = {
         "Zahlen fehlen": (h.missing_facts(source, out), lambda v: not v),
@@ -32,28 +34,35 @@ def check(source: str, out: str, style: str) -> dict:
         "Einschränkungen fehlen": (h.missing_qualifiers(qualifiers, out), lambda v: len(v) <= 1),
         "neue Verknüpfungen": (sum(e for a, b in pairs for _, e, _ in h.new_connectors(a, b)), lambda v: v <= 1),
         "Sätze ohne Grundlage": ([s[:60] for a, b in pairs for s in h.unsupported_sentences(a, b)], lambda v: len(v) <= 1),
-        "Fragmente": (h.fragments(out) if strict else [], lambda v: not v),
+        "Fragmente": ([f for _, b in pairs for f in h.fragments(b)] if strict else [], lambda v: not v),
         "Abschwächungen fehlen": ([x for a, b in pairs for x in h.missing_hedges(h.extract_hedges(a), b)], lambda v: len(v) <= 1),
         "Verneinungen fehlen": ([x[:60] for a, b in pairs for x in h.missing_negations(a, b)], lambda v: not v),
         "Quellen erfunden": (h.invented_citations(source, out), lambda v: not v),
         "Teilsätze ohne Grundlage": ([x[:60] for a, b in pairs for x in h.unsupported_clauses(a, b)], lambda v: len(v) <= 1),
         "Verneinungen erfunden": ([x[:60] for a, b in pairs for x in h.added_negations(a, b)], lambda v: not v),
-        "Wiederholungen": (h.repeated_sentences(out) + [s for s in h.raw_sentences(out) if h.doubled_clauses(s)],
+        "Wiederholungen": (h.repeated_sentences(body) + [s for _, b in pairs for s in h.raw_sentences(b) if h.doubled_clauses(s)],
                            lambda v: not v),
         "Zitate verändert": ([q for q in h.QUOTE.findall(source) if q not in out], lambda v: not v),
         "Quellenangaben verändert": ([c for c in h.CITATION.findall(source) if c not in out], lambda v: not v),
         "Zuschreibungen fehlen": ([x[:60] for a, b in pairs for x in h.missing_attributions(a, b)], lambda v: not v),
         "Konjunktiv verloren": ([x[:60] for a, b in pairs for x in h.missing_subjunctive(a, b)], lambda v: len(v) <= 1),
+        "Verzeichnisse und Platzhalter verändert": ([b[:50] for i, b in enumerate(h.split_blocks(source)[0])
+                                                     if i in h.protected_blocks(h.split_blocks(source)[0]) and b not in out],
+                                                    lambda v: not v),
+        "Verschachtelte Quellenklammern": (re.findall(r"\(vgl\.\s*\(", out), lambda v: not v),
+        "Autorenpaar getrennt": ([f"{a} und {b}" for a, b in re.findall(r"\b([A-ZÄÖÜ][\wäöüß-]+) und ([A-ZÄÖÜ][\wäöüß-]+)\b",
+                                                                        h.CITATION.sub(" ", source))
+                                  if {a, b} <= h.author_names(source) and f"{a} und {b}" not in out], lambda v: not v),
         "Überschriften verändert": ([p for p in h.paragraphs(source) if h.is_heading(p) and p not in h.paragraphs(out)],
                                     lambda v: not v),
         "Aussagen fehlen": ([x[:60] for a, b in pairs for x in h.dropped_statements(a, b)], lambda v: not v),
         # In 98 % der Menschentexte höchstens einer.
-        "Füllsätze und Satzmuster-Echos": (h.filler_sentences(out) + [b for _, b in h.echo_pairs(out)], lambda v: len(v) <= 1),
+        "Füllsätze und Satzmuster-Echos": (h.filler_sentences(body) + [b for _, b in h.echo_pairs(body)], lambda v: len(v) <= 1),
         # An 900 mitgelieferten Menschentexten geeicht: 80 % von ihnen haben höchstens 2, und 80 % der sachlichen
         # eine Streuung ab 0,45.
-        "Floskeln": (h.tell_count(out) + len(h.habits(out)), lambda v: v <= 2),
-        "Streuung": (h.burstiness(out), lambda v: v >= 0.45),
-        "kaum verändert": (len(h.unchanged_sentences(source, out)), lambda v: v <= 0.2 * count),
+        "Floskeln": (h.tell_count(body) + len(h.habits(body)), lambda v: v <= 2),
+        "Streuung": (h.burstiness(body), lambda v: v >= 0.45),
+        "kaum verändert": (sum(len(h.unchanged_sentences(a, b)) for a, b in pairs), lambda v: v <= 0.2 * count),
         # Kürzer ist in Ordnung, solange nichts verloren geht; das prüfen die Kriterien oben.
         "Länge": (round(ratio, 2), lambda v: 0.7 <= v <= 1.2),
     }

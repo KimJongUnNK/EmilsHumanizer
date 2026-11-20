@@ -519,10 +519,26 @@ def protect(text: str) -> tuple[str, dict[str, str]]:
 _ACTIVE: dict[str, str] = {}
 
 
+def unwrap_cited_tokens(text: str) -> str:
+    """"(vgl. ⟦Qa⟧)", "(⟦Qa⟧)" und "(vgl. ⟦Qa⟧; ⟦Qb⟧)" werden zu "⟦Qa⟧" bzw. "⟦Qa⟧ ⟦Qb⟧": Die Klammer steckt schon in
+    der Quellenangabe, sonst steht am Ende "(vgl. (vgl. Koch, 1993, S. 31))"."""
+    return re.sub(r"\(\s*(?:(?:vgl\.|siehe|s\.|nach)\s*)?((?:⟦Q[a-z]+⟧\s*[;,]?\s*)+)\)",
+                  lambda m: " ".join(re.findall(r"⟦Q[a-z]+⟧", m.group(1))), text)
+
+
+NESTED_VGL = re.compile(r"\(vgl\.\s*(\(vgl\.[^()]*\)(?:\s*[;,]\s*\(vgl\.[^()]*\))*)\)")
+
+
+def fix_nested_citations(text: str) -> str:
+    """Letztes Sicherheitsnetz: "(vgl. (vgl. Koch, 1993, S. 31))" → "(vgl. Koch, 1993, S. 31)"."""
+    return NESTED_VGL.sub(r"\1", text)
+
+
 def normalize_tokens(text: str, mapping: dict[str, str] | None = None) -> str:
     """Bringt Platzhalter, die das Modell leicht verändert ("[Qa]", "⟦ Qa ⟧"), in die richtige Form. Hat es statt
     eines Platzhalters das Zitat selbst wörtlich hingeschrieben, wird daraus wieder der Platzhalter."""
     text = re.sub(r"[⟦\[]\s*([QZ])\s*([a-z]+)\s*[⟧\]]", r"⟦\1\2⟧", text)
+    text = unwrap_cited_tokens(text)
     for token, original in (_ACTIVE if mapping is None else mapping).items():
         if token not in text and original in text:
             text = text.replace(original, token, 1)
@@ -560,6 +576,14 @@ def missing_attributions(source: str, result: str, names: set[str] | None = None
             if not any(name in _names_in(s, {name}) for s in near):
                 lost.append(original)
                 break
+        else:
+            # "Hendrickson und Buckhurst" ist ein Autorenpaar, "Hendrickson sowie Buckhurst" nicht mehr dasselbe.
+            plain = CITATION.sub(" ", original)
+            for a, b in re.findall(r"\b([A-ZÄÖÜ][\wäöüß-]+) und ([A-ZÄÖÜ][\wäöüß-]+)\b", plain):
+                near = [s for s in outs if overlap(original, s) >= 0.3 and _names_in(s, {a, b})]
+                if a in names and b in names and near and not any(f"{a} und {b}" in s for s in near):
+                    lost.append(original)
+                    break
     return lost
 
 
@@ -580,7 +604,10 @@ def missing_subjunctive(source: str, result: str) -> list[str]:
 def original_hints(text: str) -> list[str]:
     """Auffälligkeiten im Original, die die App nicht anfasst: offene Klammern und doppelte Sätze."""
     hints = []
-    for paragraph in paragraphs(text):
+    blocks = split_blocks(text)[0]
+    skip = protected_blocks(blocks)
+    blocks = [b for i, b in enumerate(blocks) if i not in skip]
+    for paragraph in blocks:
         depth, start = 0, None
         for i, ch in enumerate(paragraph):
             if ch == "(":
@@ -595,7 +622,7 @@ def original_hints(text: str) -> list[str]:
                 depth = max(0, depth - 1)
         if depth > 0 and start is not None:
             hints.append("Klammer nicht geschlossen: „" + paragraph[start:start + 45].strip() + "…“")
-    for paragraph in paragraphs(text):
+    for paragraph in blocks:
         raw = {_mask(r): r for r in raw_sentences(paragraph)}
         for sentence in repeated_sentences(paragraph):
             hints.append("Satz wiederholt einen vorherigen: „" + raw.get(sentence, sentence)[:60] + "…“")
@@ -904,6 +931,14 @@ def flatten(paragraph: str) -> str:
     return normalize_tokens(re.sub(r"\s*\n+\s*", " ", paragraph).strip())
 
 
+META_TALK = re.compile(r"\b(?:Vorlage|Platzhalter|Ausgangstext|Quellsatz|fast wörtlich|wörtlich übernomm\w*)\b", re.I)
+
+
+def meta_talk(source: str, text: str) -> list[str]:
+    """Wörter aus der Anweisung ans Modell ("aus einer Vorlage", "Platzhalter"), die im Text nichts verloren haben."""
+    return [m.group(0) for m in META_TALK.finditer(text) if not re.search(re.escape(m.group(0)), source, re.I)]
+
+
 def sentence_issues(source: str, sentence: str) -> dict[str, list[str]]:
     """Was an einem einzelnen Satz der Ausgabe zu reparieren ist: Floskeln, wörtliche Übernahme, neue Verknüpfung."""
     low = sentence.lower()
@@ -913,7 +948,7 @@ def sentence_issues(source: str, sentence: str) -> dict[str, list[str]]:
         "verknüpfung": [connector_name(w) for words in CONNECTORS.values() for w in words
                         if re.search(r"\b%s\b" % w, sentence, re.I) and not re.search(r"\b%s\b" % w, source, re.I)],
         "unbelegt": unsupported_clauses(source, sentence) + [s for s in added_negations(source, sentence)][:1]
-        + invented_citations(source, sentence),
+        + invented_citations(source, sentence) + meta_talk(source, sentence),
     }
     return {k: v for k, v in issues.items() if v}
 
@@ -934,14 +969,14 @@ def repair_request(sentence: str, issues: dict[str, list[str]]) -> str:
     if "floskel" in issues:
         lines.append("Vermeide diese Wendungen: " + ", ".join(issues["floskel"]) + ". Sag konkret, was gemeint ist.")
     if "wörtlich" in issues:
-        lines.append("Der Satz ist fast unverändert aus einer Vorlage übernommen. Stell ihn um: beginne mit einem "
-                     "anderen Satzteil, wähle andere Verben und Wörter. Der Inhalt bleibt gleich.")
+        lines.append("Der Satz klingt noch fast wie zuvor. Stell ihn um: beginne mit einem anderen Satzteil, wähle "
+                     "andere Verben und Wörter. Der Inhalt bleibt gleich. Erwähne diese Anweisung nicht im Satz.")
     if "verknüpfung" in issues:
         lines.append("Die Wörter " + ", ".join(f'"{w}"' for w in issues["verknüpfung"]) + " behaupten einen "
                      "Zusammenhang, der nicht belegt ist. Verbinde die Aussagen neutral (mit \"und\", Relativsatz oder "
                      "Doppelpunkt) oder mach zwei Sätze daraus.")
     if "unbelegt" in issues:
-        lines.append("Diese Teile stehen nicht in der Vorlage, lass sie weg: " + " / ".join(f'"{u}"' for u in issues["unbelegt"])
+        lines.append("Diese Teile stehen nicht im Text, lass sie weg: " + " / ".join(f'"{u}"' for u in issues["unbelegt"])
                      + ". Erfinde keine Quelle, keine Verneinung und keine Begründung.")
     # Zahlen aus Quellenangaben nicht einzeln aufzählen, sonst hängt das Modell sie als "; 2015; 67" an den Satz.
     keep = list(dict.fromkeys(CITATION.findall(sentence)
@@ -1050,6 +1085,29 @@ def repair_sentences(source: str, parts: list[str], model: str, url: str, qualif
     return parts, done
 
 
+def new_citations(sentence: str, rest: str) -> list[str]:
+    """Quellenangaben des Satzes, deren Text im übrigen Text noch nicht vorkommt. Platzhalter zählen über ihren
+    Originaltext: dieselbe Quelle ein zweites Mal ist nichts Neues."""
+    seen = {_ACTIVE.get(c, c) for c in CITATION.findall(rest)}
+    return [c for c in CITATION.findall(sentence) if _ACTIVE.get(c, c) not in seen]
+
+
+def bare_reference(sentence: str) -> bool:
+    """Ein "Satz" aus nur Namen und Quellenangaben ohne Aussage, etwa "Brockett et al (vgl. …) (vgl. …).". Entsteht,
+    wenn das Modell Quellenangaben aus einem doppelten Originalsatz übrig behält."""
+    rest = re.sub(r"\s+", " ", CITATION.sub(" ", sentence)).strip(" .;,")
+    words = rest.split()
+    return bool(CITATION.search(sentence)) and len(words) <= 4 and all(
+        w[:1].isupper() or w in ("et", "al", "und", "sowie", "u.", "a.") for w in words)
+
+
+def covered_by_rest(sentence: str, rest: str, share: float = 0.8) -> bool:
+    """Stehen die Kernwörter des Satzes zusammengenommen schon in den anderen Sätzen? Dann wiederholt er nur,
+    auch wenn er keinem einzelnen Vorgänger gleicht (die Aussage zweier Sätze in einem dritten)."""
+    stems = core_stems(sentence)
+    return len(stems) >= 4 and len(stems & core_stems(rest)) / len(stems) >= share
+
+
 def drop_unfounded(source: str, parts: list[str], strict: bool) -> list[str]:
     """Streicht ohne Modell, was nicht in den Absatz gehört: Sätze ohne Grundlage in der Vorlage, die keine Angabe
     tragen, und im akademischen Stil Fragmente wie "38 %.", deren Angabe schon in einem anderen Satz steht."""
@@ -1057,14 +1115,17 @@ def drop_unfounded(source: str, parts: list[str], strict: bool) -> list[str]:
     for i, sentence in enumerate(parts):
         rest = " ".join(parts[:i] + parts[i + 1:])
         carries = CITATION.search(sentence) or missing_facts(sentence, rest)
-        if unsupported_sentences(source, sentence) and not carries:
+        if unsupported_sentences(source, sentence, 0.5 if strict else 1 / 3) and not carries:
             continue
-        if strict and fragments(sentence) and not carries:
-            continue
+        if strict and (fragments(sentence) or bare_reference(sentence)) \
+                and not (new_citations(sentence, rest) or missing_facts(sentence, rest)):
+            continue  # Bruchstück, das nur Angaben trägt, die schon dastehen
         if sentence in filler_sentences(" ".join(parts)) and not missing_hedges(extract_hedges(sentence), rest):
             continue
-        if kept and not carries and sentence in repeated_sentences(" ".join(kept + [sentence])) \
-                and not missing_hedges(extract_hedges(sentence), rest):
+        if kept and not (new_citations(sentence, " ".join(kept)) or missing_facts(sentence, rest)) \
+                and (_mask(sentence).strip() in repeated_sentences(" ".join(kept + [sentence]))
+                     or covered_by_rest(sentence, " ".join(kept))) \
+                and not missing_hedges(extract_hedges(sentence), rest) and not added_negations(" ".join(kept), sentence):
             continue  # wiederholt nur, was schon dasteht
         kept.append(sentence)
     return kept or parts[:1]
@@ -1167,9 +1228,10 @@ def drop_repeats(parts: list[str]) -> list[str]:
     kept = []
     for sentence in parts:
         rest = " ".join(kept)
-        unique = missing_facts(sentence, rest) or any(c not in rest for c in CITATION.findall(sentence)) or \
+        unique = missing_facts(sentence, rest) or new_citations(sentence, rest) or \
             missing_hedges(extract_hedges(sentence), rest) or _negations(sentence) > _negations(rest)
-        if kept and not unique and _mask(sentence).strip() in repeated_sentences(" ".join(kept + [sentence])):
+        if kept and not unique and (_mask(sentence).strip() in repeated_sentences(" ".join(kept + [sentence]))
+                                    or covered_by_rest(sentence, rest)):
             continue
         kept.append(sentence)
     return kept
@@ -1313,7 +1375,8 @@ def restore_facts(source: str, parts: list[str], complete: bool = False) -> tupl
         lost = [o for o in dropped_statements(source, text) + missing_negations(source, text)
                 + missing_attributions(source, text) + missing_subjunctive(source, text) if o not in parts]
         bad = next((i for i, p in enumerate(parts) if p not in originals and (added_negations(source, p)
-                                                                              or invented_citations(source, p))), None)
+                                                                              or invented_citations(source, p)
+                                                                              or meta_talk(source, p))), None)
         if bad is not None and not lost:
             put(max(originals, key=lambda o: overlap(o, parts[bad])), bad)
             continue
@@ -1395,9 +1458,9 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
     für Zeichen wieder ein. Das Modell kann sie so weder umformulieren noch übersetzen."""
     masked, mapping = protect(paragraph)
     quotes = {t: o for t, o in mapping.items() if t.startswith("⟦Z")}
-    legend = ("Platzhalter: ⟦Qa⟧, ⟦Qb⟧ … sind Quellenangaben, ⟦Za⟧, ⟦Zb⟧ … wörtliche Zitate. Übernimm jeden genau "
-              "einmal und unverändert, im Satz mit derselben Aussage. Schreib nie den Zitattext selbst hin. Zur "
-              "Orientierung, was die Zitate sagen:\n" + "\n".join(f"{t} = {o}" for t, o in quotes.items()) + "\n\n"
+    legend = ("Die Zeichen ⟦Qa⟧, ⟦Qb⟧ … stehen für Quellenangaben, ⟦Za⟧, ⟦Zb⟧ … für wörtliche Zitate. Setze jedes Zeichen "
+              "genau einmal und unverändert in den Satz mit derselben Aussage. Schreib den Zitattext nie selbst hin "
+              "und erwähne diese Zeichen oder diese Anweisung nicht im Text. So lauten die Zitate:\n" + "\n".join(f"{t} = {o}" for t, o in quotes.items()) + "\n\n"
               if mapping else "")
     _ACTIVE.clear()
     _ACTIVE.update(mapping)
@@ -1411,7 +1474,7 @@ def rewrite_paragraph(paragraph: str, style: str, model: str, url: str, pool: li
     text = strip_token_debris(masked, normalize_tokens(text, mapping), mapping)
     if not text.strip() or any(t not in text for t in mapping):  # Sicherheitsnetz: lieber das Original
         return paragraph, extra, [unprotect(q, mapping) for q in qualifiers]
-    return unprotect(text, mapping), extra, [unprotect(q, mapping) for q in qualifiers]
+    return fix_nested_citations(unprotect(text, mapping)), extra, [unprotect(q, mapping) for q in qualifiers]
 
 
 def _rewrite_masked(paragraph: str, style: str, model: str, url: str, pool: list, retries: int = 1,
@@ -1513,7 +1576,8 @@ def humanize_checked(text: str, style: str, model: str, url: str = OLLAMA_URL, p
     Zurück kommen der Text, 1 plus die Zahl der Nachbesserungen und alle Einschränkungen, die erhalten bleiben sollten.
     """
     paras, seps = split_blocks(text)
-    todo = [i for i, p in enumerate(paras) if needs_rewrite(p)]
+    skip = protected_blocks(paras)
+    todo = [i for i, p in enumerate(paras) if needs_rewrite(p) and i not in skip]
     # Die Wendungen sind von Anfang an verboten, nicht erst nach ihrem ersten Auftreten.
     out, extra, used, qualifiers = list(paras), 0, [name for _, name in HABITS], []
     for step, i in enumerate(todo, start=1):
@@ -1631,7 +1695,7 @@ def new_connectors(source: str, result: str) -> list[tuple[str, int, list[str]]]
     return found
 
 
-def unsupported_sentences(source: str, result: str) -> list[str]:
+def unsupported_sentences(source: str, result: str, share: float = 1 / 3) -> list[str]:
     """Sätze der Ausgabe, deren Kernwörter zu weniger als einem Drittel in der Vorlage vorkommen, also
     hinzugedichtet sind, etwa "Das gilt für alle Bereiche."."""
     # Als Teil eines zusammengesetzten Worts zählt ein Stamm auch: "Veranstalter" steckt in "Festivalveranstalter".
@@ -1642,9 +1706,21 @@ def unsupported_sentences(source: str, result: str) -> list[str]:
         stems = core_stems(sentence)
         if any(n in numbers for n, _, _ in facts(sentence)):
             continue  # trägt eine Zahl aus dem Original, ist also belegt
-        if len(stems) >= 2 and sum(st in text for st in stems) / len(stems) < 1 / 3:
+        if len(stems) >= 2 and sum(st in text for st in stems) / len(stems) < share:
             found.append(sentence)
     return found
+
+
+PUBLICATION_YEAR = re.compile(
+    r"\b(?:Werk|Schrift|Arbeit|Buch|Aufsatz|Studie|Publikation)\w*\s+(?:von|aus dem Jahr|aus)\s+(?:dem Jahr\s+)?(?:1[4-9]\d\d|20\d\d)\b"
+    r"|\berschien\s+(?:im Jahr\s+)?(?:1[4-9]\d\d|20\d\d)\b")
+
+
+def year_as_publication(source: str, result: str) -> list[str]:
+    """Aus "Koch nennt das Jahr 1716" wird "Kochs Werk von 1716": Ein Datum ist plötzlich ein Erscheinungsjahr. Das
+    Modell macht das oft, und eine Prüfung ohne Signalwort findet es nicht. Deshalb nur ein Hinweis."""
+    have = {m.group(0).lower() for m in PUBLICATION_YEAR.finditer(source)}
+    return list(dict.fromkeys(m.group(0) for m in PUBLICATION_YEAR.finditer(result) if m.group(0).lower() not in have))
 
 
 def misplaced_citations(source: str, result: str) -> list[tuple[str, str]]:
@@ -1698,7 +1774,8 @@ def extract_qualifiers(paragraph: str) -> list[str]:
     Festivalveranstalter". Allgemeine Wendungen wie "im Bereich" oder "in der Regel" zählen nicht.
     """
     found = [m.group(0) for m in QUALIFIER_PP.finditer(paragraph)] + \
-            [m.group(0) for m in QUALIFIER_ADJ.finditer(paragraph)]
+            [m.group(0) for m in QUALIFIER_ADJ.finditer(paragraph)] + \
+            [m.group(0) for m in re.finditer(r"\([A-ZÄÖÜ][\wäöüß-]{3,}\)", paragraph)]  # "(Kadoza)"
     kept, stems = [], []
     for item in found:
         core = core_stems(item)
@@ -1836,6 +1913,25 @@ def is_heading(line: str) -> bool:
     return bool(line) and len(line.split()) <= 14 and not re.search(r"[.!?]\s*$", line) and bool(HEADING.match(line))
 
 
+# Überschriften von Verzeichnissen und Anhängen ("A Literaturverzeichnis", "Internetquellen"), auch mit Platzhalter dahinter.
+ZONE_HEAD = re.compile(
+    r"^(?:(?:[A-Z]|\d+(?:\.\d+)*)\.?\s+)?(?:Inhaltsverzeichnis|Literaturverzeichnis|Literatur|Quellenverzeichnis|Quellen|"
+    r"Internetquellen|Abbildungsverzeichnis|Tabellenverzeichnis|Abkürzungsverzeichnis|Symbolverzeichnis|Anhang|Anlagen|"
+    r"Glossar|Eidesstattliche Erklärung|Selbstständigkeitserklärung)(?:\s*\[[^\]]*\])?$", re.I)
+TOC_HEAD = re.compile(r"^Inhaltsverzeichnis$", re.I)
+# Literatureintrag: "Kubalcik, Stan (2004): Titel …", "ASME (o. J.): Titel …"
+ENTRY = re.compile(r"[A-ZÄÖÜ][^()\n]{1,80}\((?:1[4-9]\d\d|20\d\d)[a-z]?\)\s*:|[A-ZÄÖÜ][^()\n]{1,60}\((?:o\.\s?J\.|n\.\s?d\.)\)\s*:")
+URL = re.compile(r"https?://|www\.", re.I)
+BRACKETS = re.compile(r"\[[^\]]*\]")
+
+
+def is_structural(line: str) -> bool:
+    """Zeile, die nie mitten in einem Absatz steht: Literatureintrag, Verzeichnis-Überschrift, Platzhalter in [ ]."""
+    line = line.strip()
+    return bool(line) and bool(ZONE_HEAD.match(line) or ENTRY.match(line) or line.startswith("[") or
+                               (BRACKETS.search(line) and len(BRACKETS.sub("", line).split()) <= 8))
+
+
 def split_blocks(text: str) -> tuple[list[str], list[str]]:
     """Teilt einen Text in Absätze und merkt sich, was dazwischen stand. Absätze trennt eine Leerzeile oder ein
     einfacher Zeilenumbruch nach einem Satzende oder einer Überschrift, wie beim Kopieren aus Word. Ein Umbruch
@@ -1850,12 +1946,38 @@ def split_blocks(text: str) -> tuple[list[str], list[str]]:
         # Geht die nächste Zeile klein weiter, war es ein Umbruch mitten im Satz, keine Überschrift.
         starts_new = bool(re.match(r"\s*[A-ZÄÖÜ0-9„\"»(]", nxt))
         ends = re.search(r"[.!?:“”\")»«]\s*$", line) or (is_heading(line) and starts_new)
-        if not sep or sep.count("\n") > 1 or ends or is_heading(nxt):
+        if not sep or sep.count("\n") > 1 or ends or is_heading(nxt) or is_structural(nxt) or is_structural(line):
             if current:
                 blocks.append(current)
                 seps.append("\n\n" if sep.count("\n") > 1 else ("\n" if sep else ""))
             current = ""
     return blocks, seps
+
+
+def protected_blocks(blocks: list[str]) -> set[int]:
+    """Welche Absätze bleiben Zeichen für Zeichen, wie sie sind: Deckblatt (alles vor dem Inhaltsverzeichnis),
+    Verzeichnisse und Anhänge, Literatureinträge, Adressen und Platzhalter in [ ]. Ein Literaturverzeichnis zu
+    umformulieren zerstört es; ein Platzhalter wie "[Text]" ist kein Text."""
+    protected: set[int] = set()
+    toc = next((i for i, b in enumerate(blocks) if TOC_HEAD.match(b.strip())), None)
+    if toc is not None:
+        protected.update(range(toc))
+    zone = None  # "toc": bis zum ersten Fließtext; "end": bis zum nächsten nummerierten Kapitel
+    for i, block in enumerate(blocks):
+        text = block.strip()
+        if zone == "toc" and needs_rewrite(block):
+            zone = None
+        if zone == "end" and re.match(r"\d+(?:\.\d+)*\s+\S", text) and not ZONE_HEAD.match(text):
+            zone = None
+        if zone is None and ZONE_HEAD.match(text):
+            zone = "toc" if TOC_HEAD.match(text) else "end"
+        if zone is not None:
+            protected.add(i)
+            continue
+        placeholder = bool(BRACKETS.search(text)) and len(BRACKETS.sub("", text).split()) <= 8
+        if placeholder or ENTRY.search(text) or URL.search(text):
+            protected.add(i)
+    return protected
 
 
 def paragraphs(text: str) -> list[str]:
@@ -1875,23 +1997,51 @@ def shrinkage(source: str, result: str) -> int:
     return round(100 * (before - len(result.split())) / before) if before else 0
 
 
+def aligned_blocks(source: str, result: str) -> list[tuple[int, str, str]]:
+    """Ordnet die Absätze der Ausgabe denen des Originals zu: (Nummer im Original, alt, neu). Stimmt die Zahl der
+    Absätze nicht, wird nach größter Übereinstimmung zugeordnet statt der Reihe nach."""
+    old, new = split_blocks(source)[0], split_blocks(result)[0]
+    if len(old) == len(new):
+        return [(i, a, b) for i, (a, b) in enumerate(zip(old, new))]
+    out, j = [], 0
+    for i, a in enumerate(old):
+        if j < len(new) and new[j] == a:
+            out.append((i, a, new[j]))
+            j += 1
+            continue
+        window = range(j, min(j + 3, len(new)))
+        best = max(window, key=lambda k: overlap(a, new[k]), default=None)
+        if best is not None and overlap(a, new[best]) >= 0.3:
+            out.append((i, a, new[best]))
+            j = best + 1
+    return out
+
+
+def rewritten_pairs(source: str, result: str) -> list[tuple[str, str]]:
+    """Die Absätze, die die App umschreiben sollte (nicht Überschriften, Verzeichnisse, Platzhalter), als (alt, neu)."""
+    skip = protected_blocks(split_blocks(source)[0])
+    return [(a, b) for i, a, b in aligned_blocks(source, result) if i not in skip and needs_rewrite(a)]
+
+
 def warnings(source: str, result: str, qualifiers: list[str] | None = None, strict: bool = False) -> str:
     parts = []
     hints = original_hints(source)
     if hints:
-        parts.append("Im Original (bleibt so): " + "; ".join(hints))
-    if strict and fragments(result):
-        parts.append("Satzfragment: " + " / ".join(f'"{f}"' for f in fragments(result)))
-    left = habits(result)
+        parts.append("Im Original gefunden: " + "; ".join(hints))
+    pairs = rewritten_pairs(source, result) or list(zip(paragraphs(source), paragraphs(result)))
+    body = " ".join(b for _, b in pairs)  # nur umgeschriebener Text: Überschriften, Verzeichnisse und Platzhalter nicht
+    fragmentary = [f for _, b in pairs for f in fragments(b)]
+    if strict and fragmentary:
+        parts.append("Satzfragment: " + " / ".join(f'"{f}"' for f in fragmentary))
+    left = habits(body)
     if left:
         parts.append("Floskel: " + ", ".join(left))
     lost = missing_qualifiers(qualifiers or [], result)
     if lost:
         parts.append("Einschränkung fehlt: " + "; ".join(lost))
-    weaker = [x for a, b in zip(paragraphs(source), paragraphs(result)) for x in missing_hedges(extract_hedges(a), b)]
+    weaker = [x for a, b in pairs for x in missing_hedges(extract_hedges(a), b)]
     if weaker:
         parts.append("Abschwächung fehlt, Aussage jetzt absoluter: " + ", ".join(dict.fromkeys(weaker)))
-    pairs = list(zip(paragraphs(source), paragraphs(result)))
     for sentence in [x for a, b in pairs for x in missing_attributions(a, b)]:
         parts.append(f'Autor nicht mehr genannt, jetzt eigene Behauptung: "{sentence[:60]}"')
     for sentence in [x for a, b in pairs for x in missing_subjunctive(a, b)]:
@@ -1909,15 +2059,17 @@ def warnings(source: str, result: str, qualifiers: list[str] | None = None, stri
         parts.append(f'Verneinung dazugekommen: "{sentence[:60]}"')
     if invented_citations(source, result):
         parts.append("Quelle erfunden: " + ", ".join(invented_citations(source, result)))
-    for sentence in filler_sentences(result):
+    for sentence in [x for _, b in pairs for x in filler_sentences(b)]:
         parts.append(f'Füllsatz: "{sentence}"')
+    for text in year_as_publication(source, result):
+        parts.append(f'Jahr jetzt als Erscheinungsjahr, prüfen: "{text}"')
     for citation, _ in misplaced_citations(source, result):
         parts.append(f"Quelle verrutscht: {citation}")
-    for sentence in raw_sentences(result):
+    for sentence in [x for _, b in pairs for x in raw_sentences(b)]:
         if doubled_clauses(sentence):
             parts.append(f'Aussage doppelt im Satz: "{sentence[:60]}"')
-    if repeated_sentences(result):
-        parts.append(f"{len(repeated_sentences(result))} Satz/Sätze wiederholt")
+    if repeated_sentences(body):
+        parts.append(f"{len(repeated_sentences(body))} Satz/Sätze wiederholt")
     added_links = new_connectors(source, result)
     if added_links:
         parts.append("neue Begründung oder Gegensatz, prüfen: " +
@@ -1934,7 +2086,7 @@ def warnings(source: str, result: str, qualifiers: list[str] | None = None, stri
     shorter = shrinkage(source, result)
     if shorter > 30:  # bis 30 % kürzer ist in Ordnung, wenn nur Floskeln wegfallen
         parts.append(f"Ausgabe ist {shorter} % kürzer als das Original")
-    same = unchanged_sentences(source, result)
+    same = [x for a, b in pairs for x in unchanged_sentences(a, b)]
     if len(same) > 1:
         parts.append(f"{len(same)} Sätze kaum verändert")
     return ("Achtung: " + "  ·  ".join(parts) + ". Gegenlesen oder noch einmal umschreiben.") if parts else ""
@@ -2453,11 +2605,13 @@ class App:
             lead = len(raw) - len(raw.lstrip())
             for start, end in gone:
                 self.input.tag_add("weg", f"1.0+{lead + start}c", f"1.0+{lead + end}c")
+        kept = len(protected_blocks(split_blocks(source)[0]))
         self.status.config(fg=MUTED, text=(
             f"Fertig in {seconds:.0f} s{f' ({passes - 1}× nachgebessert)' if passes > 1 else ''}  ·  "
             f"{changed_share(result, added)} % neu formuliert  ·  "
             f"Satzlängen-Streuung {burstiness(source)} → {burstiness(result)}  ·  "
-            f"KI-Floskeln {tell_count(source)} → {tell_count(result)}"))
+            f"KI-Floskeln {tell_count(source)} → {tell_count(result)}" +
+            (f"  ·  {kept} Absätze unverändert (Deckblatt, Verzeichnisse, Platzhalter)" if kept else "")))
         strict = self.last_style == "Akademisch"
         self.warning.config(text="  ".join(filter(None, [warnings(source, result, qualifiers, strict),
                                                          source_hints(source, self._source_texts()), note])))

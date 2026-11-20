@@ -85,6 +85,14 @@ Für Uni-Texte gilt: Direkte Zitate und Quellenangaben bleiben Zeichen für Zeic
 - **Überschriften** wie "2.1 Vorformen in der Antike" bleiben stehen, auch wenn Absätze nur mit einfachem Zeilenumbruch getrennt sind (wie beim Kopieren aus Word). Die Zeilenstruktur der Ausgabe entspricht dem Original.
 - **Hinweise zum Original:** Eine nicht geschlossene Klammer oder ein doppelter Satz im Original wird gemeldet, aber nicht verändert.
 
+**Ganze Dokumente (Projektarbeit mit Deckblatt und Verzeichnissen):** Die App schreibt nur Fließtext um. Unverändert bleiben:
+- das **Deckblatt** (alles vor dem "Inhaltsverzeichnis"),
+- **Verzeichnisse und Anhänge** ab ihrer Überschrift: Inhalts-, Literatur-, Quellen-, Abbildungs-, Tabellen-, Abkürzungsverzeichnis, "Internetquellen", "Anhang", "Glossar", "Eidesstattliche Erklärung". Ein Verzeichnis reicht bis zum nächsten nummerierten Kapitel,
+- **Literatureinträge** wie "Tanaka, Hiro (2008): …" oder "ASME (o. J.): …", auch ohne Satzpunkt am Zeilenende, und Zeilen mit Internetadresse,
+- **Platzhalter in eckigen Klammern** ("[Text]", "[frei]", "[Abbildung 1: Quelle, Seite]") und Überschriften mit solchem Platzhalter.
+
+Die Statuszeile nennt, wie viele Absätze unverändert blieben. Die Verzeichnis-Überschriften erkennt die App am Namen; heißt dein Literaturverzeichnis anders, bleibt es nur geschützt, soweit seine Einträge wie oben aussehen.
+
 **Text laden …** holt den Text direkt aus einer Word-Datei (.docx), PDF oder .txt.
 
 **Quellen …** lädt dein Literaturverzeichnis und/oder die Quellen selbst (.docx, .pdf, .txt). Nach dem Umschreiben prüft die App:
@@ -126,7 +134,7 @@ Läuft Ollama auf einem anderen Rechner oder Port, die Adresse über die Umgebun
 
 ## Testreihe: so gut ist der Stand gemessen
 
-In `werkzeuge/testtexte/` liegen sechs KI-typische Texte zu Event-Engineering-Themen (Nachhaltigkeit, Technikgeschichte, Sponsoring, Zeitplanung, Kaffeekultur, Bühnenversenkung), fünf akademisch, einer locker. Der sechste ist wie ein Uni-Kapitel gebaut: nummerierte Überschriften, einfache Zeilenumbrüche, direkte Zitate auf Deutsch und Englisch, Quellenangaben mit und ohne "vgl.", "o. J.", Autoren im Fließtext und indirekte Rede. Alle Quellenangaben darin sind erfunden. `werkzeuge/testreihe.py` schreibt jeden Text um und prüft das Ergebnis gegen feste Kriterien:
+In `werkzeuge/testtexte/` liegen sieben Texte zu Event-Engineering-Themen (Nachhaltigkeit, Technikgeschichte, Sponsoring, Zeitplanung, Kaffeekultur, Bühnenversenkung, Verfolgerscheinwerfer), sechs akademisch, einer locker. Der sechste ist wie ein Uni-Kapitel gebaut: nummerierte Überschriften, einfache Zeilenumbrüche, direkte Zitate auf Deutsch und Englisch, Quellenangaben mit und ohne "vgl.", "o. J.", Autoren im Fließtext und indirekte Rede. Der siebte ist eine ganze Projektarbeit mit Deckblatt, Inhaltsverzeichnis, Platzhaltern, Literaturverzeichnis, Internetquellen und Anhang. Alle Quellenangaben und Inhalte darin sind erfunden. `werkzeuge/testreihe.py` schreibt jeden Text um und prüft das Ergebnis gegen feste Kriterien:
 
 | Kriterium | Grenze |
 |---|---|
@@ -143,6 +151,9 @@ In `werkzeuge/testtexte/` liegen sechs KI-typische Texte zu Event-Engineering-Th
 | Wiederholungen (ganzer Satz oder doppelte Satzhälfte) | keine |
 | direkte Zitate oder Quellenangaben verändert | keine |
 | Überschriften verändert | keine |
+| Verzeichnisse, Deckblatt und Platzhalter verändert | keine |
+| verschachtelte Quellenklammern "(vgl. (vgl. …))" | keine |
+| Autorenpaar "A und B" getrennt | keine |
 | Zuschreibungen fehlen ("Nach Koch …" wird zur eigenen Behauptung) | keine |
 | Konjunktiv der indirekten Rede verloren ("biete" → "bietet") | höchstens 1 |
 | Füllsätze und Satzmuster-Echos ("Sicherheit ist entscheidend.") | höchstens 1 |
@@ -154,20 +165,21 @@ In `werkzeuge/testtexte/` liegen sechs KI-typische Texte zu Event-Engineering-Th
 
 Die Prüfungen auf Füllsätze, Echos, Kommasätze und doppelte Satzhälften sind an rund 5.500 echten Menschentexten aus `beispieltexte/` geeicht: Dort schlagen sie in höchstens 1 bis 2 % der Texte an.
 
-**Gemessen mit `gemma3:12b`: 5 von 12 Läufen bestanden** (sechs Texte, je zwei Läufe). Das Ziel von 8 von 10 ist damit verfehlt.
+**Gemessen mit `gemma3:12b`: 5 von 14 Läufen bestanden** (sieben Texte, je zwei Läufe). Das Ziel von 8 von 10 ist damit klar verfehlt.
 
 | Text | bestanden | woran es scheiterte |
 |---|---|---|
-| Nachhaltigkeit | 1 von 2 | eine Aussage fehlt |
-| Technikgeschichte | 0 von 2 | Teilsätze ohne Grundlage; Wiederholung, fehlender Schlusssatz, 3 Sätze kaum verändert |
-| Sponsoring | 1 von 2 | 4 Floskeln |
-| Zeitplanung | 2 von 2 | – |
-| Kaffeekultur | 1 von 2 | Streuung 0,43, 3 Sätze kaum verändert |
-| Bühnenversenkung | 0 von 2 | Teilsätze ohne Grundlage; Wiederholung, fehlender Satz, kaum veränderte Sätze |
+| Nachhaltigkeit | 1 von 2 | eine Aussage fehlt, 3 Floskeln, 6 Sätze kaum verändert |
+| Technikgeschichte | 1 von 2 | Streuung 0,36 |
+| Sponsoring | 2 von 2 | – |
+| Zeitplanung | 1 von 2 | zwei Einschränkungen fehlen, 4 Sätze kaum verändert |
+| Kaffeekultur | 0 von 2 | hinzugedichtete Halbsätze, Floskeln, Streuung 0,3, kaum veränderte Sätze |
+| Bühnenversenkung | 0 von 2 | 4 Sätze kaum verändert; eine Wiederholung |
+| Projektarbeit mit Verzeichnissen | 0 von 2 | hinzugedichtete Halbsätze, Wiederholung, fehlende Zuschreibung, erfundene Verneinung |
 
-Was in allen zwölf Läufen hält: Kein direktes Zitat, keine Quellenangabe und keine Überschrift wurde verändert, keine Quelle fehlt oder ist erfunden, keine Zahl fehlt oder ist erfunden. Die Fehlschläge: dreimal fehlt eine Aussage des Originals ganz, dazu hinzugedichtete Halbsätze, Wiederholungen, zu viele Floskeln und Sätze, die das Modell kaum umformuliert hat.
+Was in allen 14 Läufen hält: Deckblatt, Verzeichnisse und Platzhalter bleiben wortgleich, keine verschachtelte Quellenklammer, kein getrenntes Autorenpaar, kein direktes Zitat und keine Quellenangabe verändert, keine Überschrift verändert. Die Fehlschläge sind Qualitätsfehler des 12B-Modells: hinzugedichtete Halbsätze, Wiederholungen, Floskeln und Sätze, die kaum umformuliert wurden.
 
-Zum Vergleich: Das vorige Release kam auf den fünf alten Texten auf 7 von 10, dieser Stand dort auf 5 von 10. Bei zwei Läufen pro Text schwankt das stark. Dafür richtet das vorige Release bei echten Uni-Kapiteln Schaden an: Überschriften verschmelzen mit dem Text, Quellenangaben ohne "vgl." sind ungeschützt, Zitate können umformuliert oder übersetzt werden.
+Achtung beim Vergleich mit früheren Zahlen: Streuung, Fragmente, Wiederholungen, Füllsätze, Floskeln und "kaum verändert" werden jetzt nur am umgeschriebenen Text gemessen, nicht mehr an Überschriften und Verzeichnissen. Die Quote ist mit der alten (5 von 12) nur grob vergleichbar. Bei zwei Läufen pro Text schwankt sie stark.
 
 Ein echter Lauf eines Nutzers liegt als fester Prüffall in `werkzeuge/pruefaelle/`.
 

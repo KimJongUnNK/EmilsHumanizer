@@ -1488,3 +1488,148 @@ def test_zitat_steht_nur_einmal_und_ohne_vorgesagten_text():
     mapping = {"⟦Za⟧": "„erste Versenkung“"}
     assert h.strip_quote_echo(["Sie zählen andere Bauarten als erste Versenkung ⟦Za⟧."], mapping) == \
         ["Sie zählen andere Bauarten als ⟦Za⟧."]
+
+
+# --- Ganzes Dokument: Deckblatt, Verzeichnisse, Platzhalter, Literatur (aus einem Echtlauf nachgebaut) -----------
+DOKUMENT = (
+    "Musterhochschule Linz\nProjektarbeit, Wintersemester 2026/2027\nDer Verfolgerscheinwerfer\n"
+    "1 Seite, nicht nummeriert. Dieses Blatt zeigt Titel, Namen und Abgabedatum und wird am Ende ausgefüllt.\n\n"
+    "Inhaltsverzeichnis\n1 Einleitung\t3\n2 Ursprünge\t4\nA Literaturverzeichnis\t9\nLiteratur\t10\nB Anhang\t11\n\n"
+    "1 Einleitung\n"
+    "Die Arbeit untersucht, wie sich Lichtquelle und Bedienung des Scheinwerfers verändert haben. Sie folgt einem klaren Aufbau.\n"
+    "2 Ursprünge\n"
+    "Weidner verweist auf Kerzenspiegel im Barocktheater und ordnet sie nur als Vorstufe ein (vgl. Weidner, 2006, S. 55). "
+    "Tanaka datiert den ersten Scheinwerfer auf 1837 (vgl. Tanaka, 2008, S. 91).\n"
+    "3 Steuerung\n3.1 [frei]\n[Text]\n4 Fazit [Gemeinsam. Antwort auf die Forschungsfrage.]\n"
+    "A Literaturverzeichnis\nLiteratur\n"
+    "Okonkwo, Ada (1999): Lichtführung im Theater, Diplomarbeit, Universität Wien\n"
+    "Tanaka, Hiro (2008): Early Electric Followspots, in: Journal of Theatre Engineering, Jg. 12, S. 88–97\n"
+    "Weidner, Karl (2006): Beleuchtung der Bühne, 3. Auflage, Berlin: Technikverlag\n"
+    "Internetquellen\n"
+    "Lexikon der Bühne (o. J.): Verfolger, https://example.org/verfolger, 16.11.2026 [Abrufdatum auf den Tag des Screenshots setzen.]\n"
+    "B Anhang [Screenshots der Internetquellen mit sichtbarer URL und Abrufdatum.]")
+
+
+def test_verzeichnisse_und_platzhalter_sind_geschuetzt():
+    bloecke, _ = h.split_blocks(DOKUMENT)
+    geschuetzt = h.protected_blocks(bloecke)
+    offen = [b[:30] for i, b in enumerate(bloecke) if i not in geschuetzt and h.needs_rewrite(b)]
+    assert len(offen) == 2 and offen[0].startswith("Die Arbeit untersucht") and offen[1].startswith("Weidner verweist")
+    # Literatureinträge ohne Satzpunkt kleben nicht zu einem Absatz zusammen
+    assert sum(1 for b in bloecke if h.ENTRY.match(b)) == 4
+    assert "Okonkwo, Ada (1999): Lichtführung im Theater, Diplomarbeit, Universität Wien" in bloecke
+    for b in ("[Text]", "3.1 [frei]", "4 Fazit [Gemeinsam. Antwort auf die Forschungsfrage.]", "Musterhochschule Linz"):
+        assert bloecke.index(b) in geschuetzt
+    # das Inhaltsverzeichnis verschluckt den Text danach nicht
+    assert bloecke.index("Die Arbeit untersucht, wie sich Lichtquelle und Bedienung des Scheinwerfers verändert haben. "
+                         "Sie folgt einem klaren Aufbau.") not in geschuetzt
+
+
+def test_dokument_wird_nur_im_fliesstext_umgeschrieben(monkeypatch):
+    gesehen = []
+
+    def modell(model, url, messages):
+        gesehen.append(" ".join(m["content"] for m in messages if m["role"] == "user"))
+        return "Ein ganz anderer Satz zu dieser Sache. Dazu kommt noch ein zweiter Satz."
+    monkeypatch.setattr(h, "_chat", modell)
+    out, _, _ = h.humanize_checked(DOKUMENT, "Akademisch", "x")
+    bloecke, _ = h.split_blocks(DOKUMENT)
+    for i in h.protected_blocks(bloecke):
+        assert bloecke[i] in out
+    assert out.count("\n") == DOKUMENT.count("\n")  # Zeilenstruktur bleibt
+    assert gesehen and not any("Okonkwo" in text or "Lexikon der Bühne" in text or "Wintersemester" in text for text in gesehen)
+
+
+def test_text_ohne_verzeichnisse_wird_nicht_geschuetzt():
+    text = "Die Anlage läuft seit Jahren zuverlässig im Dauerbetrieb. Sie wird regelmäßig gewartet und geprüft.\n2 Technik\nNoch ein Absatz."
+    bloecke, _ = h.split_blocks(text)
+    assert h.protected_blocks(bloecke) == set()  # ohne Verzeichnis-Überschrift, ohne Platzhalter: nichts geschützt
+    lang = ("Das Team prüft jede Leitung vor dem Aufbau gründlich und dokumentiert alle Ergebnisse in einer Liste, "
+            "wie der Hersteller es [sic] vorschreibt. Danach folgt die Abnahme durch die Bauleitung.")
+    assert h.protected_blocks([lang]) == set()
+
+
+def test_doppelte_klammer_um_quellenangabe():
+    m = {"⟦Qa⟧": "(vgl. Koch, 1993, S. 31)", "⟦Qb⟧": "(vgl. Semper, 1904, S. 320)"}
+    für = h.normalize_tokens("Premiere (vgl. ⟦Qa⟧), danach (vgl. ⟦Qa⟧; ⟦Qb⟧) und (⟦Qb⟧).", m)
+    assert "(" not in für
+    assert h.unprotect("Premiere ⟦Qa⟧.", m) == "Premiere (vgl. Koch, 1993, S. 31)."
+    assert h.fix_nested_citations("A (vgl. (vgl. Koch, 1993, S. 31)) B (vgl. (vgl. Semper, 1904, S. 320); (vgl. Koch, 1993, S. 32)).") \
+        == "A (vgl. Koch, 1993, S. 31) B (vgl. Semper, 1904, S. 320); (vgl. Koch, 1993, S. 32)."
+
+
+def test_modell_darf_klammer_um_platzhalter_setzen(monkeypatch):
+    def modell(model, url, messages):
+        return "Koch nennt das Jahr 1716 (vgl. ⟦Qa⟧). Er betont den Unterschied zur Münchner Scheibe."
+    monkeypatch.setattr(h, "_chat", modell)
+    quelle = "Koch führt für Japan das Jahr 1716 an und betont, dass sie nicht der Münchner Scheibe entsprach (vgl. Koch, 1993, S. 31 f.)."
+    out, _, _ = h.rewrite_paragraph(quelle, "Akademisch", "x", "u", [])
+    assert "(vgl. (vgl." not in out and out.count("(vgl. Koch, 1993, S. 31 f.)") == 1
+
+
+def test_anweisung_taucht_nicht_im_text_auf():
+    angefragt = h.repair_request("Der Satz bleibt.", {"wörtlich": ["Der Satz bleibt."]})
+    assert "Vorlage" not in angefragt and "Erwähne diese Anweisung nicht" in angefragt
+    leck = "Grösel übernimmt fast wörtlich aus einer Vorlage seine Sicht auf die Drehscheibe."
+    assert h.meta_talk("Grösel beschreibt den Nutzen der Drehscheibe.", leck) == ["fast wörtlich", "Vorlage"]
+    assert h.meta_talk("Das Wort Vorlage steht im Original.", "Die Vorlage bleibt.") == []
+    assert "meta" not in h.sentence_issues("Grösel beschreibt den Nutzen.", "Grösel beschreibt den Nutzen kurz.")
+    assert h.sentence_issues("Grösel beschreibt den Nutzen.", leck).get("unbelegt")
+
+
+def test_bruchstueck_mit_bekannter_quelle_faellt_weg():
+    h._ACTIVE.clear()
+    h._ACTIVE.update({"⟦Qa⟧": "(vgl. Brockett et al., 2010, S. 200)", "⟦Qb⟧": "(vgl. Kubalcik, 2004, S. 89)",
+                      "⟦Qc⟧": "(vgl. Brockett et al., 2010, S. 200)", "⟦Qd⟧": "(vgl. Kubalcik, 2004, S. 89)"})
+    try:
+        teile = ["Brockett et al. nennen 1496 ⟦Qa⟧, Kubalcik 1490 ⟦Qb⟧.", "Brockett et al ⟦Qc⟧ ⟦Qd⟧."]
+        assert h.drop_unfounded("x", teile, strict=True) == teile[:1]
+        assert h.drop_unfounded("x", teile, strict=False) == teile  # nur im akademischen Stil
+        neu = ["Koch nennt das Jahr 1716 ⟦Qa⟧.", "Brockett et al. sehen das anders ⟦Qc⟧."]
+        assert h.drop_unfounded("x", neu, strict=True) == neu  # ein vollständiger Satz bleibt
+    finally:
+        h._ACTIVE.clear()
+
+
+def test_satz_der_nur_vorgaenger_zusammenfasst_faellt_weg():
+    teile = ["Tsuboi zitiert auf Seite 208 den Historiker Sugino, nach dem die Münchner Bühne von 1896 erst 128 Jahre nach "
+             "Shozos Verbesserung der Bühne entstand.",
+             "Sugino datiert die Münchner Bühne auf 128 Jahre nach Shozos Verbesserung der Bühne."]
+    assert h.drop_repeats(teile) == teile[:1]
+    mit_neuem = [teile[0], "Sugino datiert die Münchner Bühne auf 1896, nicht auf 1768."]
+    assert h.drop_repeats(mit_neuem) == mit_neuem  # trägt eine neue Zahl
+
+
+def test_warnungen_pruefen_nur_umgeschriebene_absaetze():
+    quelle = ("2.2 Die Drehbühne im japanischen Kabuki\nDie Entwicklung begann in Kyoto. Sie dauerte lange.\n"
+              "Okonkwo, Ada (1999): Lichtführung im Theater, Diplomarbeit, Universität Wien\n"
+              "B Anhang [Screenshots der Internetquellen mit sichtbarer URL und Abrufdatum.]")
+    gleich = h.warnings(quelle, quelle, [], True)
+    assert "doppelt im Satz" not in gleich and "Anhang" not in gleich and "Screenshots" not in gleich
+    # Überschrift plus erster Satz sind kein "Satz"; ein anderer Absatz mit anderer Blockzahl paart nicht falsch
+    kuerzer = "2.2 Die Drehbühne im japanischen Kabuki\nDie Entwicklung begann in Kyoto. Sie dauerte lange."
+    assert "ohne Grundlage" not in h.warnings(quelle, kuerzer, [], True)
+    assert len(h.aligned_blocks(quelle, kuerzer)) >= 2
+
+
+def test_autorenpaar_bleibt_zusammen():
+    quelle = ("Hendrickson und Buckhurst bezeichnen das Drehen als junge Einführung (vgl. Hendrickson und Buckhurst, 2013, S. 359). "
+              "Sie sehen darin einen Effekt.")
+    schlecht = "Hendrickson sowie Buckhurst bezeichnen das Drehen als junge Einführung. Sie sehen darin einen Effekt."
+    gut = "Hendrickson und Buckhurst sehen das Drehen als junge Einführung. Sie sehen darin einen Effekt."
+    assert h.missing_attributions(quelle, schlecht)
+    assert not h.missing_attributions(quelle, gut)
+
+
+def test_datum_wird_nicht_zum_erscheinungsjahr():
+    quelle = "Koch führt für Japan das Jahr 1716 an. Kubalcik datiert es auf 1758."
+    assert h.year_as_publication(quelle, "Kochs Werk von 1716 gehört zur ersten Kategorie, Kubalciks Schrift von 1758 zur zweiten.") \
+        == ["Werk von 1716", "Schrift von 1758"]
+    assert h.year_as_publication("Das Werk von 1716 ist alt.", "Das Werk von 1716 ist alt.") == []
+    assert "Jahr jetzt als Erscheinungsjahr" in h.warnings(quelle, "Kochs Werk von 1716 gilt. Kubalcik datiert es auf 1758.", [], True)
+
+
+def test_ortsangabe_in_klammern_ist_eine_einschraenkung():
+    absatz = "Shozo Namiki schuf 1758 in Osaka (Kadoza) einen neuen Typ."
+    assert "(Kadoza)" in h.extract_qualifiers(absatz)
+    assert h.missing_qualifiers(["(Kadoza)"], "Shozo Namiki schuf 1758 in Osaka einen neuen Typ.") == ["(Kadoza)"]

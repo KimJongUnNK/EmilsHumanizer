@@ -1,0 +1,54 @@
+Stil: Akademisch
+Musterhochschule Linz
+Bachelorstudiengang Veranstaltungstechnik
+Wissenschaftliches Arbeiten 1
+Projektarbeit, Wintersemester 2026/2027
+Der Verfolgerscheinwerfer
+Wie sich Lichtquelle und Bedienung vom 19. Jahrhundert bis heute entwickelt haben
+Verfasst von
+Anna Muster
+Ben Beispiel
+Lehrveranstaltungsleiter: Dr. Max Mustermann Abgabe: 30.11.2026
+
+1 Seite, nicht nummeriert. Dieses Blatt zeigt Titel, Namen und Abgabedatum und wird am Ende ausgefüllt.
+
+Inhaltsverzeichnis
+1 Einleitung	3
+2 Ursprünge: Vom Kalklicht zur Bogenlampe	4
+2.1 Frühe Lichtquellen	5
+2.2 Die Bogenlampe	5
+2.3 Quellenkritik	6
+3 Bedienung und Steuerung	7
+3.1 [frei]	7
+4 Fazit	8
+A Literaturverzeichnis	9
+Literatur	10
+Internetquellen	10
+B Anhang	11
+
+1 Einleitung
+Die Arbeit untersucht, wie sich Lichtquelle und Bedienung des Verfolgerscheinwerfers vom 19. Jahrhundert bis heute verändert haben. Sie folgt einem klaren Aufbau und beantwortet am Ende die Forschungsfrage.
+2 Ursprünge: Vom Kalklicht zur Bogenlampe
+Der Verfolgerscheinwerfer gilt in der Beleuchtungstechnik als vergleichsweise junge Erfindung. Halvorsen und Reinke bezeichnen das Verfolgen einer Person mit einem einzelnen Lichtkegel als „one of the defining tricks of the nineteenth-century stage“ (Halvorsen und Reinke, 2012, S. 211). Weidner beschreibt den Nutzen sachlich: Ein Scheinwerfer biete „eine bewegliche Lichtquelle für einzelne Darsteller“ (Weidner, 2006, S. 58). Dieses Kapitel zeichnet nach, wo der Verfolgerscheinwerfer herkommt und wie er sich verbreitete.
+2.1 Frühe Lichtquellen
+Bewegliche Lichtquellen sind älter als der Verfolgerscheinwerfer. Weidner verweist auf Kerzenspiegel im Barocktheater, ordnet sie jedoch nur als Vorstufe ein (vgl. Weidner, 2006, S. 55). Nach Halvorsen und Reinke sind Lampen mit Reflektor auch bei Wanderbühnen belegt. Sie verschwanden, als sich die feste Fußrampe durchsetzte (vgl. Halvorsen und Reinke, 2012, S. 212. Beim ersten Kalklichtscheinwerfer gehen die Angaben auseinander. Tanaka datiert ihn auf 1837 (vgl. Tanaka, 2008, S. 91), Okonkwo auf 1846 (vgl. Okonkwo, 1999, S. 14). Tanaka datiert ihn auf 1837 (vgl. Tanaka, 2008, S. 91), Okonkwo auf 1846 (vgl. Okonkwo, 1999, S. 14). Das Stadtmuseum erwähnt einen Versuch in Linz, beschreibt ihn aber als sehr einfach (vgl. Stadtmuseum Linz, o. J.).
+2.2 Die Bogenlampe
+Die eigentliche Entwicklung begann mit der elektrischen Bogenlampe, die nach Tanaka erstmals bei einer Pariser Oper eingesetzt wurde (vgl. Tanaka, 2008, S. 93). Die ersten Geräte, Lichtkanone genannt, entwickelte Jakob Brandl. Er führte sie in den Jahren 1881 bis 1885 ein. Es handelte sich um Handgeräte, bei denen ein Bediener die Kohlestäbe selbst nachstellte. 1889 baute Eva Lindner in Wien (Hofoper) einen neuen Typ (vgl. Tanaka, 2008, S. 93 f.). Okonkwo datiert die Erfindung des ersten Verfolgers ebenfalls auf 1889 und hält fest, dass ab 1902 die meisten großen Theater ein solches Gerät besaßen (vgl. Okonkwo, 1999, S. 16). Weidner führt das Jahr 1891 an, betont aber, dass dieses Gerät in Bauart und Wirkung nicht dem später in Berlin gebauten entsprach (vgl. Weidner, 2006, S. 56 f.).
+Die Bedienung war reine Handarbeit. Ein Mitarbeiter konnte ein Gerät von über 30 kg auf einem Stativ schwenken. Beispielsweise im Hofoper-Theater hatte ein Gerät einen Mechanismus namens „Kugelkopf-Gelenk“, welcher den Bedienern einen wesentlichen Vorteil beim Schwenken verschaffte, da dieser die Reibung drastisch senkte (vgl. Tanaka, 2008, S. 95). Das Lexikon ordnet die Erfindung ebenfalls dem späten 19. Jahrhundert zu (vgl. Lexikon der Bühne, o. J.).
+2.3 Quellenkritik
+Beim Vergleichen der Quellen sind uns Widersprüche aufgefallen. Für den ersten Scheinwerfer nennt Tanaka das genaue Jahr 1837 (vgl. Tanaka, 2008, S. 91), Okonkwo 1846 (vgl. Okonkwo, 1999, S. 14), Weidner 1891 (vgl. Weidner, 2006, S. 56). Eine mögliche Erklärung ist, dass die Autoren verschiedene Bauarten als „erster Verfolger“ zählen. Das bleibt eine Vermutung, denn weder Tanaka noch Okonkwo sagen, welche Bauart sie meinen. Okonkwo ist zudem eine Diplomarbeit von 1999, die von zwei Lehrenden betreut wurde (vgl. Okonkwo, 1999, S. 3).
+Bei der Bogenlampe widersprechen sich die Quellen nicht. Für die Pariser Erstaufführung geben Tanaka und Weidner dieselbe Jahreszahl an (vgl. Tanaka, 2008, S. 93; Weidner, 2006, S. 56). Genauere Angaben macht der Eintrag dort nicht (vgl. Lexikon der Bühne, o. J.).
+3 Bedienung und Steuerung
+3.1 [frei]
+[Text]
+4 Fazit [Gemeinsam. Antwort auf die Forschungsfrage.]
+A Literaturverzeichnis
+Literatur
+Halvorsen, Ingrid; Reinke, Paul (2012): Stage Lighting in Practice, Oslo: Nordlicht Verlag
+Okonkwo, Ada (1999): Lichtführung im Theater, Diplomarbeit, Universität Wien
+Tanaka, Hiro (2008): Early Electric Followspots, in: Journal of Theatre Engineering, Jg. 12, S. 88–97
+Weidner, Karl (2006): Beleuchtung der Bühne, 3. Auflage, Berlin: Technikverlag
+Internetquellen
+Lexikon der Bühne (o. J.): Verfolger, https://example.org/verfolger, 16.11.2026
+Stadtmuseum Linz (o. J.): Lichtgeschichte, https://example.org/linz-licht, 18.11.2026 [Abrufdatum jeweils auf den Tag des Screenshots setzen.]
+B Anhang [Screenshots der Internetquellen mit sichtbarer URL und Abrufdatum.]

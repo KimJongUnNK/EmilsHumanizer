@@ -85,6 +85,14 @@ Für Uni-Texte gilt: Direkte Zitate und Quellenangaben bleiben Zeichen für Zeic
 - **Überschriften** wie "2.1 Vorformen in der Antike" bleiben stehen, auch wenn Absätze nur mit einfachem Zeilenumbruch getrennt sind (wie beim Kopieren aus Word). Die Zeilenstruktur der Ausgabe entspricht dem Original.
 - **Hinweise zum Original:** Eine nicht geschlossene Klammer oder ein doppelter Satz im Original wird gemeldet, aber nicht verändert.
 
+**Ganze Dokumente (Projektarbeit mit Deckblatt und Verzeichnissen):** Die App schreibt nur Fließtext um. Unverändert bleiben:
+- das **Deckblatt** (alles vor dem "Inhaltsverzeichnis"),
+- **Verzeichnisse und Anhänge** ab ihrer Überschrift: Inhalts-, Literatur-, Quellen-, Abbildungs-, Tabellen-, Abkürzungsverzeichnis, "Internetquellen", "Anhang", "Glossar", "Eidesstattliche Erklärung". Ein Verzeichnis reicht bis zum nächsten nummerierten Kapitel,
+- **Literatureinträge** wie "Tanaka, Hiro (2008): …" oder "ASME (o. J.): …", auch ohne Satzpunkt am Zeilenende, und Zeilen mit Internetadresse,
+- **Platzhalter in eckigen Klammern** ("[Text]", "[frei]", "[Abbildung 1: Quelle, Seite]") und Überschriften mit solchem Platzhalter.
+
+Die Statuszeile nennt, wie viele Absätze unverändert blieben. Die Verzeichnis-Überschriften erkennt die App am Namen; heißt dein Literaturverzeichnis anders, bleibt es nur geschützt, soweit seine Einträge wie oben aussehen.
+
 **Text laden …** holt den Text direkt aus einer Word-Datei (.docx), PDF oder .txt.
 
 **Quellen …** lädt dein Literaturverzeichnis und/oder die Quellen selbst (.docx, .pdf, .txt). Nach dem Umschreiben prüft die App:
